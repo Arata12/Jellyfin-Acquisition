@@ -1,0 +1,506 @@
+/* Acquisition Plugin Styles for Jellyfin Web */
+
+/*
+ * Design tokens. The client adds .acq-theme-jellyfin or .acq-theme-abyss to the search block and the modal
+ * (plugin option "Estilo del buscador"; "auto" picks Abyss when that theme is installed).
+ * To adapt the look without touching the plugin, set the public variables from Jellyfin's custom CSS, e.g.:
+ *   :root { --acquisition-accent: 255, 90, 90; --acquisition-radius: 16px; }
+ * Colour variables are "R, G, B" triplets (no rgb() wrapper) so opacity variants keep working.
+ */
+.acq-theme-jellyfin {
+    --acq-accent: var(--acquisition-accent, 0, 164, 220);
+    --acq-on-accent: var(--acquisition-on-accent, #fff);
+    --acq-radius: var(--acquisition-radius, 6px);
+    /* Jellyfin's own theme colours (dialog surface and text), so other Jellyfin themes are followed too */
+    --acq-surface: var(--acquisition-surface, var(--jf-palette-background-paperChannel, 32 32 32));
+    --acq-text: var(--jf-palette-text-primary, #fff);
+    --acq-text-secondary: var(--jf-palette-text-secondary, rgba(255, 255, 255, 0.7));
+    --acq-overlay: rgba(0, 0, 0, 0.5);
+    --acq-overlay-blur: 0px;
+    --acq-blur: var(--acquisition-blur, 4px);
+    --acq-ease: var(--acquisition-ease, ease);
+    --acq-card-bg: rgba(255, 255, 255, 0.04);
+    --acq-card-bg-hover: rgba(255, 255, 255, 0.08);
+    --acq-card-border: transparent;
+    --acq-card-border-hover: transparent;
+    --acq-card-lift: -4px;
+    --acq-secondary-bg: #444;
+    --acq-secondary-bg-hover: #555;
+    --acq-modal-bg: rgb(var(--acq-surface));
+    --acq-title-weight: 500;
+    --acq-meta-weight: 400;
+}
+
+/* Mirrors the Abyss theme (github.com/AumGupta/abyss-jellyfin): glass surfaces, larger radius, light accent */
+.acq-theme-abyss {
+    --acq-accent: var(--acquisition-accent, var(--abyss-accent, 245, 245, 247));
+    --acq-on-accent: var(--acquisition-on-accent, #121212);
+    --acq-radius: var(--acquisition-radius, var(--abyss-radius, 12px));
+    --acq-surface: var(--acquisition-surface, var(--abyss-glass-tint, 42, 42, 42));
+    --acq-blur: var(--acquisition-blur, var(--abyss-glass-blur, 15px));
+    --acq-text: #fff;
+    --acq-text-secondary: rgba(255, 255, 255, 0.75);
+    --acq-overlay: rgba(0, 0, 0, 0.35);
+    --acq-overlay-blur: var(--acq-blur);
+    --acq-ease: var(--acquisition-ease, var(--abyss-ease, cubic-bezier(0.16, 1, 0.3, 1)));
+    --acq-card-bg: transparent;
+    --acq-card-bg-hover: transparent;
+    --acq-card-border: rgba(var(--acq-accent), 0.06);
+    --acq-card-border-hover: rgba(var(--acq-accent), 0.45);
+    --acq-card-lift: -2px;
+    --acq-secondary-bg: rgba(0, 0, 0, 0.3);
+    --acq-secondary-bg-hover: rgba(var(--acq-accent), 0.12);
+    --acq-modal-bg: rgba(var(--acq-surface), 0.69);
+    --acq-title-weight: 600;
+    --acq-meta-weight: 200;
+}
+
+.acquisition-section {
+    position: relative;
+    clear: both;
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 3em;
+    margin-bottom: 3em;
+    padding-top: 1.5em;
+    padding-bottom: 1.5em;
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    background: transparent;
+    overflow: visible;
+}
+
+.acquisition-empty {
+    padding: 1.5em;
+    margin: 1em 0;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: var(--acq-radius);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-sizing: border-box;
+    clear: both;
+    display: block;
+    width: 100%;
+}
+
+.acquisition-header {
+    display: flex;
+    align-items: baseline;
+    gap: 1em;
+    margin-bottom: 1em;
+}
+
+.acquisition-header h2 {
+    margin: 0;
+    font-size: 1.4em;
+    font-weight: 600;
+    color: #e0e0e0;
+}
+
+.acquisition-subtitle {
+    font-size: 0.9em;
+    color: #888;
+}
+
+.acquisition-loading {
+    color: #aaa;
+    font-style: italic;
+    padding: 1em 0;
+}
+
+.acquisition-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1.2em;
+}
+
+.acquisition-card {
+    background: var(--acq-card-bg);
+    border-radius: var(--acq-radius);
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.3s var(--acq-ease), background 0.3s var(--acq-ease);
+    display: flex;
+    flex-direction: column;
+}
+
+.acquisition-card:hover {
+    transform: translateY(var(--acq-card-lift));
+    background: var(--acq-card-bg-hover);
+}
+
+.acquisition-card-image-box {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    background: #181818;
+    border-radius: var(--acq-radius);
+    overflow: hidden;
+    box-sizing: border-box;
+    border: 1px solid var(--acq-card-border);
+    transition: border-color 0.37s var(--acq-ease), box-shadow 0.37s var(--acq-ease);
+}
+
+.acquisition-card:hover .acquisition-card-image-box {
+    border-color: var(--acq-card-border-hover);
+}
+
+.acq-theme-abyss .acquisition-card:hover .acquisition-card-image-box {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.acquisition-card-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.acquisition-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    padding: 2px 6px;
+    font-size: 0.7em;
+    font-weight: bold;
+    border-radius: calc(var(--acq-radius) / 2);
+    background: rgba(0, 0, 0, 0.8);
+    color: #fff;
+    text-transform: uppercase;
+}
+
+.acquisition-badge.status-Pending { background: #555; } /* Pending */
+.acquisition-badge.status-Searching { background: #0078d4; } /* Searching */
+.acquisition-badge.status-Downloading { background: #0099ff; } /* Downloading */
+.acquisition-badge.status-Importing { background: #ffaa00; color: #111; } /* Importing */
+.acquisition-badge.status-Available { background: #107c10; } /* Available */
+.acquisition-badge.status-RequiresAttention { background: #d83b01; } /* RequiresAttention */
+.acquisition-badge.status-Failed { background: #e81123; } /* Failed */
+
+.acq-theme-abyss .acquisition-badge {
+    -webkit-backdrop-filter: blur(var(--acq-blur));
+    backdrop-filter: blur(var(--acq-blur));
+}
+
+.acquisition-card-content {
+    padding: 8px 10px;
+    flex-grow: 1;
+}
+
+.acq-theme-abyss .acquisition-card-content {
+    padding: 6px 2px 0;
+}
+
+.acquisition-card-title {
+    font-size: 0.9em;
+    font-weight: var(--acq-title-weight);
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.acquisition-card-meta {
+    font-size: 0.78em;
+    font-weight: var(--acq-meta-weight);
+    color: #999;
+    margin-top: 4px;
+}
+
+.acq-theme-abyss .acquisition-card-meta {
+    color: #fff;
+    opacity: 0.8;
+}
+
+/* Modal Overlay */
+.acquisition-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* Like Jellyfin's own dialogs: a 50% black backdrop without blur (Abyss keeps its lighter frosted backdrop) */
+    background: var(--acq-overlay);
+    -webkit-backdrop-filter: blur(var(--acq-overlay-blur));
+    backdrop-filter: blur(var(--acq-overlay-blur));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 99999;
+    padding: 20px;
+}
+
+.acquisition-modal-content {
+    background: var(--acq-modal-bg);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: calc(var(--acq-radius) + 4px);
+    max-width: 680px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    color: var(--acq-text);
+}
+
+.acq-theme-abyss .acquisition-modal-content {
+    -webkit-backdrop-filter: blur(var(--acq-blur));
+    backdrop-filter: blur(var(--acq-blur));
+    border-color: rgba(var(--acq-accent), 0.08);
+}
+
+.acquisition-modal-close {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    background: transparent;
+    border: none;
+    color: var(--acq-text-secondary);
+    font-size: 1.8em;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.acquisition-modal-close:hover {
+    color: var(--acq-text);
+}
+
+.acquisition-modal-body {
+    display: flex;
+    gap: 20px;
+    padding: 24px;
+}
+
+.acquisition-modal-sidebar {
+    flex-shrink: 0;
+    width: 160px;
+}
+
+.acquisition-modal-poster {
+    width: 100%;
+    border-radius: var(--acq-radius);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.acquisition-modal-main {
+    flex-grow: 1;
+}
+
+.acquisition-modal-title {
+    margin: 0 0 4px 0;
+    font-size: 1.5em;
+    color: var(--acq-text);
+}
+
+.acquisition-modal-title .year {
+    color: #888;
+    font-weight: normal;
+}
+
+.acquisition-modal-meta {
+    font-size: 0.85em;
+    color: var(--acq-text-secondary);
+    margin-bottom: 12px;
+}
+
+.acquisition-modal-overview {
+    font-size: 0.9em;
+    line-height: 1.5;
+    color: var(--acq-text-secondary);
+    margin-bottom: 20px;
+}
+
+.acquisition-btn-primary {
+    background: rgb(var(--acq-accent));
+    color: var(--acq-on-accent);
+    border: none;
+    border-radius: calc(var(--acq-radius) * 0.66);
+    padding: 10px 18px;
+    font-size: 0.95em;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.3s var(--acq-ease);
+}
+
+.acquisition-btn-primary:hover {
+    background: rgba(var(--acq-accent), 0.82);
+}
+
+.acquisition-btn-primary:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.acquisition-btn-secondary {
+    background: var(--acq-secondary-bg);
+    color: #fff;
+    border: 1px solid transparent;
+    border-radius: calc(var(--acq-radius) * 0.66);
+    padding: 8px 14px;
+    font-size: 0.9em;
+    cursor: pointer;
+    transition: background 0.3s var(--acq-ease), border-color 0.3s var(--acq-ease);
+}
+
+.acquisition-btn-secondary:hover {
+    background: var(--acq-secondary-bg-hover);
+}
+
+.acq-theme-abyss .acquisition-btn-secondary {
+    border-color: rgba(var(--acq-accent), 0.12);
+}
+
+/* Scope checklist */
+.acquisition-scope-area {
+    margin-top: 15px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 15px;
+}
+
+.scope-options {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.episodes-checklist {
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: calc(var(--acq-radius) * 0.66);
+    padding: 10px;
+    margin-bottom: 12px;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.season-block {
+    margin-bottom: 10px;
+}
+
+.season-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.95em;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+.episodes-sublist {
+    margin-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.episode-item {
+    font-size: 0.85em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #ccc;
+}
+
+.episode-item.has-file {
+    opacity: 0.5;
+}
+
+/* Status View */
+.acquisition-status-area {
+    margin-top: 15px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: var(--acq-radius);
+    padding: 12px;
+}
+
+.status-box {
+    font-size: 1em;
+    margin-bottom: 6px;
+}
+
+.status-label {
+    color: #888;
+    margin-right: 6px;
+}
+
+.acquisition-progress {
+    font-size: 0.85em;
+    color: #ccc;
+    margin: 0 0 10px 0;
+}
+
+.acquisition-progress-issues {
+    margin: 6px 0 0 0;
+    padding-left: 18px;
+    color: #ffb74d;
+}
+
+.acquisition-progress-hint {
+    margin-top: 6px;
+    padding: 6px 10px;
+    border-radius: calc(var(--acq-radius) * 0.66);
+    background: rgba(var(--acq-accent), 0.12);
+    color: #fff;
+}
+
+#status-detail {
+    font-size: 0.85em;
+    color: #aaa;
+    margin: 6px 0 10px 0;
+}
+
+/* Manual Release Selection Table */
+.releases-selection-list {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--acq-radius);
+    padding: 12px;
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+.releases-table {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.release-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.04);
+    padding: 10px 12px;
+    border-radius: calc(var(--acq-radius) * 0.66);
+    gap: 12px;
+}
+
+.release-row.ineligible {
+    opacity: 0.6;
+}
+
+.release-info {
+    flex-grow: 1;
+}
+
+.release-meta {
+    font-size: 0.82em;
+    color: #aaa;
+    margin-top: 4px;
+}
+
+.rejection-reasons {
+    font-size: 0.78em;
+    color: #ff6b6b;
+    margin-top: 4px;
+}
+
+.label-ineligible {
+    font-size: 0.8em;
+    color: #888;
+}
+
+.status-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}

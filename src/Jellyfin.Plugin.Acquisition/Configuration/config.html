@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <title>Configuración de Adquisición</title>
+</head>
+<body>
+<div data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
+    <div data-role="content">
+        <div class="content-primary">
+            <form class="acquisitionConfigForm">
+                <div style="margin-bottom: 20px;">
+                    <button is="emby-button" type="button" id="btnLoadOptions" class="raised button-accent" style="margin-right: 10px;">
+                        <span>Cargar opciones desde servicios</span>
+                    </button>
+                    <span id="loadOptionsStatus" style="font-weight: bold;"></span>
+                </div>
+
+                <h2>Integración Sonarr (Series)</h2>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="SonarrUrl">URL de Sonarr</label>
+                    <input is="emby-input" type="text" id="SonarrUrl" name="SonarrUrl" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="SonarrApiKey">API Key</label>
+                    <input is="emby-input" type="password" id="SonarrApiKey" name="SonarrApiKey" />
+                </div>
+                <div class="selectContainer">
+                    <label class="selectLabel" for="SonarrQualityProfileId">Perfil técnico para dar de alta en Sonarr</label>
+                    <select is="emby-select" id="SonarrQualityProfileId" name="SonarrQualityProfileId" class="emby-select-withcolor">
+                        <option value="0">— Sin elegir (solo válido si Sonarr tiene un único perfil) —</option>
+                    </select>
+                    <div class="fieldDescription">Solo se usa al registrar títulos nuevos; los títulos existentes conservan su perfil. La calidad de las releases la deciden las preferencias del plugin. Pulsa «Cargar opciones desde servicios» para ver los perfiles.</div>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="SonarrCategory">Categoría qBittorrent (avanzado)</label>
+                    <input is="emby-input" type="text" id="SonarrCategory" name="SonarrCategory" />
+                    <div class="fieldDescription">Déjalo vacío para usar la categoría del cliente qBittorrent configurado en Sonarr. Rellénalo solo si no se puede leer de Sonarr.</div>
+                    <div id="sonarrClientDiscovered" style="margin-top: 5px; font-size: 0.9em; color: #888;"></div>
+                </div>
+
+                <h2>Integración Radarr (Películas)</h2>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="RadarrUrl">URL de Radarr</label>
+                    <input is="emby-input" type="text" id="RadarrUrl" name="RadarrUrl" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="RadarrApiKey">API Key</label>
+                    <input is="emby-input" type="password" id="RadarrApiKey" name="RadarrApiKey" />
+                </div>
+                <div class="selectContainer">
+                    <label class="selectLabel" for="RadarrQualityProfileId">Perfil técnico para dar de alta en Radarr</label>
+                    <select is="emby-select" id="RadarrQualityProfileId" name="RadarrQualityProfileId" class="emby-select-withcolor">
+                        <option value="0">— Sin elegir (solo válido si Radarr tiene un único perfil) —</option>
+                    </select>
+                    <div class="fieldDescription">Solo se usa al registrar títulos nuevos; los títulos existentes conservan su perfil. La calidad de las releases la deciden las preferencias del plugin. Pulsa «Cargar opciones desde servicios» para ver los perfiles.</div>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="RadarrCategory">Categoría qBittorrent (avanzado)</label>
+                    <input is="emby-input" type="text" id="RadarrCategory" name="RadarrCategory" />
+                    <div class="fieldDescription">Déjalo vacío para usar la categoría del cliente qBittorrent configurado en Radarr. Rellénalo solo si no se puede leer de Radarr.</div>
+                    <div id="radarrClientDiscovered" style="margin-top: 5px; font-size: 0.9em; color: #888;"></div>
+                </div>
+
+                <h2>Carpetas raíz y Destinos (Anime / Series / Películas)</h2>
+                <div class="inputContainer">
+                    <p style="font-size: 0.9em; color: #aaa;">Lista única de carpetas raíz obtenidas de Sonarr/Radarr. Pulsa «Cargar opciones desde servicios» y añade las carpetas que quieras ofrecer, con su nombre visible. Si no configuras ninguna, se ofrecen todas las carpetas de Arr y el usuario elige.</p>
+                    <div id="destinationsContainer" style="margin-bottom: 10px;"></div>
+                    <div id="sonarrRootsDiscovered" style="margin-top: 10px; font-size: 0.9em; color: #888;"></div>
+                    <div id="radarrRootsDiscovered" style="margin-top: 5px; font-size: 0.9em; color: #888;"></div>
+                </div>
+
+                <h2>Integración Prowlarr</h2>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="ProwlarrUrl">URL de Prowlarr</label>
+                    <input is="emby-input" type="text" id="ProwlarrUrl" name="ProwlarrUrl" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="ProwlarrApiKey">API Key</label>
+                    <input is="emby-input" type="password" id="ProwlarrApiKey" name="ProwlarrApiKey" />
+                </div>
+
+                <h2>Integración qBittorrent</h2>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="QBittorrentUrl">URL WebUI</label>
+                    <input is="emby-input" type="text" id="QBittorrentUrl" name="QBittorrentUrl" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="QBittorrentUsername">Usuario</label>
+                    <input is="emby-input" type="text" id="QBittorrentUsername" name="QBittorrentUsername" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="QBittorrentPassword">Contraseña</label>
+                    <input is="emby-input" type="password" id="QBittorrentPassword" name="QBittorrentPassword" />
+                </div>
+
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="RemoveTagsAfterImport" name="RemoveTagsAfterImport" />
+                        <span>Eliminar etiquetas tras importar</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">El plugin marca cada torrent con una etiqueta «acq-…» para seguirlo. Con esta opción se borran las de descargas ya importadas o canceladas (el torrent se conserva). Las demás etiquetas no se tocan.</div>
+                </div>
+
+                <h2>Preferencias y Límites de Releases</h2>
+                <div class="selectContainer">
+                    <label class="selectLabel" for="ReleaseSelectionMode">Selección de release</label>
+                    <select is="emby-select" id="ReleaseSelectionMode" name="ReleaseSelectionMode" class="emby-select-withcolor">
+                        <option value="auto">Automática: se descarga la release elegible con más semillas</option>
+                        <option value="manual">Manual: el plugin busca y espera a que elijas la release</option>
+                    </select>
+                    <div class="fieldDescription">En modo manual no se envía nada a qBittorrent hasta que eliges una release en «Seleccionar release». En una serie se pide una elección por cada descarga, de una en una.</div>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="PreferredResolution">Resolución Preferida</label>
+                    <input is="emby-input" type="text" id="PreferredResolution" name="PreferredResolution" value="1080p" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="PreferredSource">Fuente Preferida</label>
+                    <input is="emby-input" type="text" id="PreferredSource" name="PreferredSource" value="WEB-DL" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="PreferredCodec">Códec Preferido</label>
+                    <input is="emby-input" type="text" id="PreferredCodec" name="PreferredCodec" value="H.264" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxMovieSizeBytes">Límite tamaño película (bytes)</label>
+                    <input is="emby-input" type="number" id="MaxMovieSizeBytes" name="MaxMovieSizeBytes" value="15000000000" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxEpisodeSizeBytes">Límite tamaño episodio (bytes)</label>
+                    <input is="emby-input" type="number" id="MaxEpisodeSizeBytes" name="MaxEpisodeSizeBytes" value="4000000000" />
+                </div>
+
+                <h2>Apariencia del buscador</h2>
+                <div class="selectContainer">
+                    <label class="selectLabel" for="SearchStyle">Estilo de «Fuera de tu biblioteca»</label>
+                    <select is="emby-select" id="SearchStyle" name="SearchStyle" class="emby-select-withcolor">
+                        <option value="auto">Automático (Abyss si el tema está instalado; si no, Jellyfin clásico)</option>
+                        <option value="jellyfin">Jellyfin clásico</option>
+                        <option value="abyss">Abyss (aunque el tema no esté instalado)</option>
+                    </select>
+                    <div class="fieldDescription">Los colores y medidas se pueden ajustar desde el CSS personalizado de Jellyfin con las variables --acquisition-accent, --acquisition-radius, --acquisition-surface y --acquisition-blur. Tras cambiarlo, recarga la página.</div>
+                </div>
+
+                <h2>Permisos</h2>
+                <div class="checkboxContainer">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="AllowAllUsers" name="AllowAllUsers" />
+                        <span>Permitir a todos los usuarios solicitar contenido</span>
+                    </label>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="AllowedUserIds">IDs de usuarios permitidos (separados por coma)</label>
+                    <input is="emby-input" type="text" id="AllowedUserIds" name="AllowedUserIds" placeholder="guid-1, guid-2" />
+                </div>
+
+                <div>
+                    <button is="emby-button" type="submit" class="raised button-submit block">
+                        <span>Guardar</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        var AcquisitionConfig = {
+            pluginId: "e2a567a4-0c6d-4789-9a72-f672d24268b8"
+        };
+
+        var page = document.querySelector('.pluginConfigurationPage');
+        if (page) {
+            var currentDestinations = [];
+            var currentConfig = null;
+
+            function escapeHtml(value) {
+                return String(value === null || value === undefined ? '' : value).replace(/[&<>"']/g, function (m) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+                });
+            }
+
+            // The server may serialize enums as numbers or as names
+            function isMovieKind(kind) {
+                return kind === 0 || kind === 'Movie';
+            }
+
+            function sameKind(a, b) {
+                return isMovieKind(a) === isMovieKind(b);
+            }
+
+            function setProfileOptions(selectId, profiles, selectedId) {
+                var select = document.querySelector(selectId);
+                var html = '<option value="0">— Sin elegir (solo válido si hay un único perfil) —</option>';
+                var found = false;
+                (profiles || []).forEach(function (p) {
+                    var id = String(p.Id || p.id);
+                    if (id === String(selectedId)) found = true;
+                    html += '<option value="' + escapeHtml(id) + '">' + escapeHtml(p.Name || p.name) + '</option>';
+                });
+                if (selectedId && String(selectedId) !== '0' && !found) {
+                    html += '<option value="' + escapeHtml(selectedId) + '">Perfil ' + escapeHtml(selectedId) + ' (no encontrado en el servicio)</option>';
+                }
+                select.innerHTML = html;
+                select.value = String(selectedId || 0);
+            }
+
+            page.addEventListener('pageshow', function () {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(AcquisitionConfig.pluginId).then(function (config) {
+                    currentConfig = config;
+                    document.querySelector('#SonarrUrl').value = config.SonarrUrl || '';
+                    document.querySelector('#SonarrApiKey').value = config.SonarrApiKey || '';
+                    setProfileOptions('#SonarrQualityProfileId', [], config.SonarrQualityProfileId || 0);
+                    document.querySelector('#SonarrCategory').value = config.SonarrCategory || '';
+
+                    document.querySelector('#RadarrUrl').value = config.RadarrUrl || '';
+                    document.querySelector('#RadarrApiKey').value = config.RadarrApiKey || '';
+                    setProfileOptions('#RadarrQualityProfileId', [], config.RadarrQualityProfileId || 0);
+                    document.querySelector('#RadarrCategory').value = config.RadarrCategory || '';
+
+                    document.querySelector('#ProwlarrUrl').value = config.ProwlarrUrl || '';
+                    document.querySelector('#ProwlarrApiKey').value = config.ProwlarrApiKey || '';
+
+                    document.querySelector('#QBittorrentUrl').value = config.QBittorrentUrl || '';
+                    document.querySelector('#QBittorrentUsername').value = config.QBittorrentUsername || 'admin';
+                    document.querySelector('#QBittorrentPassword').value = config.QBittorrentPassword || '';
+
+                    document.querySelector('#PreferredResolution').value = config.PreferredResolution || '1080p';
+                    document.querySelector('#PreferredSource').value = config.PreferredSource || 'WEB-DL';
+                    document.querySelector('#PreferredCodec').value = config.PreferredCodec || 'H.264';
+                    document.querySelector('#MaxMovieSizeBytes').value = config.MaxMovieSizeBytes || 15000000000;
+                    document.querySelector('#MaxEpisodeSizeBytes').value = config.MaxEpisodeSizeBytes || 4000000000;
+
+                    document.querySelector('#ReleaseSelectionMode').value = config.ReleaseSelectionMode === 'manual' ? 'manual' : 'auto';
+                    document.querySelector('#SearchStyle').value = ['auto', 'jellyfin', 'abyss'].indexOf(config.SearchStyle) >= 0 ? config.SearchStyle : 'auto';
+                    document.querySelector('#RemoveTagsAfterImport').checked = config.RemoveTagsAfterImport !== false;
+                    document.querySelector('#AllowAllUsers').checked = !!config.AllowAllUsers;
+                    document.querySelector('#AllowedUserIds').value = (config.AllowedUserIds || []).join(', ');
+
+                    currentDestinations = config.Destinations || [];
+                    renderDestinations();
+
+                    Dashboard.hideLoadingMsg();
+                });
+            });
+
+            function renderDestinations() {
+                var container = document.querySelector('#destinationsContainer');
+                if (!container) return;
+                container.innerHTML = '';
+                if (currentDestinations.length === 0) {
+                    container.innerHTML = '<em>No hay destinos configurados: se ofrecerán todas las carpetas raíz de Sonarr/Radarr.</em>';
+                    return;
+                }
+                currentDestinations.forEach(function (d, idx) {
+                    var div = document.createElement('div');
+                    div.style.border = '1px solid #444';
+                    div.style.padding = '8px';
+                    div.style.marginBottom = '6px';
+                    div.style.borderRadius = '4px';
+                    div.innerHTML = '<strong>' + escapeHtml(d.Name || 'Destino') + '</strong> (' + (isMovieKind(d.Kind) ? 'Películas' : 'Series') + ')' +
+                        ' - Ruta: <code>' + escapeHtml(d.RootFolderPath || '-') + '</code>' +
+                        (!isMovieKind(d.Kind) ? ' - Tipo: ' + escapeHtml(d.SeriesType || 'standard') : '') +
+                        (d.IsDefault ? ' - <em>predeterminado</em>' : ' <button type="button" class="btnDefaultDest" data-index="' + idx + '" style="margin-left:10px;">Marcar predeterminado</button>') +
+                        ' <button type="button" class="btnRemoveDest" data-index="' + idx + '" style="margin-left:10px; color:#e55;">Eliminar</button>';
+                    container.appendChild(div);
+                });
+                container.querySelectorAll('.btnRemoveDest').forEach(function (btn) {
+                    btn.addEventListener('click', function (e) {
+                        var i = parseInt(e.target.dataset.index, 10);
+                        currentDestinations.splice(i, 1);
+                        renderDestinations();
+                    });
+                });
+                container.querySelectorAll('.btnDefaultDest').forEach(function (btn) {
+                    btn.addEventListener('click', function (e) {
+                        var target = currentDestinations[parseInt(e.target.dataset.index, 10)];
+                        currentDestinations.forEach(function (d) {
+                            if (sameKind(d.Kind, target.Kind)) d.IsDefault = (d === target);
+                        });
+                        renderDestinations();
+                    });
+                });
+            }
+
+            function addDestinationFromRoot(path, kind) {
+                if (currentDestinations.some(function (d) { return sameKind(d.Kind, kind) && d.RootFolderPath === path; })) {
+                    alert('Esa carpeta ya está en la lista.');
+                    return;
+                }
+                var name = prompt('Nombre visible para esta carpeta (ej. Anime, Series, Películas):', '');
+                if (!name) return;
+                var seriesType = null;
+                if (!isMovieKind(kind)) {
+                    // The series type is an explicit choice; it is never inferred from the folder name
+                    seriesType = (prompt('Tipo de serie en Sonarr para títulos nuevos en esta carpeta (standard, anime, daily):', 'standard') || '').trim().toLowerCase();
+                    if (['standard', 'anime', 'daily'].indexOf(seriesType) < 0) {
+                        alert('Tipo no válido. Usa standard, anime o daily.');
+                        return;
+                    }
+                }
+                currentDestinations.push({
+                    Id: Math.random().toString(36).substring(2, 10) + Date.now().toString(36),
+                    Name: name,
+                    Kind: kind,
+                    RootFolderPath: path,
+                    QualityProfileId: 0,
+                    SeriesType: seriesType,
+                    IsDefault: false
+                });
+                renderDestinations();
+            }
+
+            function renderDiscovered(service, data, kind, rootsSelector, clientSelector, profileSelector, selectedProfile) {
+                var rootsEl = document.querySelector(rootsSelector);
+                var clientEl = document.querySelector(clientSelector);
+                if (!data || !(data.IsConnected ?? data.isConnected)) {
+                    rootsEl.textContent = data && (data.ErrorMessage || data.errorMessage) ? ('Error ' + service + ': ' + (data.ErrorMessage || data.errorMessage)) : '';
+                    clientEl.textContent = '';
+                    return;
+                }
+
+                setProfileOptions(profileSelector, data.QualityProfiles || data.qualityProfiles || [], selectedProfile);
+
+                var roots = data.RootFolders || data.rootFolders || [];
+                rootsEl.innerHTML = '';
+                var label = document.createElement('span');
+                label.textContent = 'Carpetas raíz ' + service + ': ';
+                rootsEl.appendChild(label);
+                roots.forEach(function (r) {
+                    var path = r.Name || r.name;
+                    var link = document.createElement('a');
+                    link.href = '#';
+                    link.style.marginRight = '8px';
+                    link.style.textDecoration = 'underline';
+                    link.textContent = '+ Añadir ' + path;
+                    link.addEventListener('click', function (e) {
+                        e.preventDefault();
+                        addDestinationFromRoot(path, kind);
+                    });
+                    rootsEl.appendChild(link);
+                });
+
+                var clients = (data.DownloadClients || data.downloadClients || []).filter(function (c) {
+                    var impl = String(c.Implementation || c.implementation || '');
+                    return (c.Enabled ?? c.enabled) && impl.toLowerCase().indexOf('qbittorrent') >= 0;
+                });
+                if (clients.length === 0) {
+                    clientEl.textContent = service + ' no tiene un cliente qBittorrent habilitado: indica la categoría manualmente.';
+                } else {
+                    clientEl.textContent = 'Clientes qBittorrent en ' + service + ': ' + clients.map(function (c) {
+                        return (c.Name || c.name) + ' (' + (c.Host || c.host || '?') + ':' + (c.Port || c.port || '?') + ', categoría: ' + ((c.Category || c.category) || 'ninguna') + ')';
+                    }).join('; ') + (clients.length > 1 ? '. Se usará el que apunte a la URL de qBittorrent del plugin.' : '');
+                }
+            }
+
+            var btnLoad = document.querySelector('#btnLoadOptions');
+            if (btnLoad) {
+                btnLoad.addEventListener('click', function () {
+                    var status = document.querySelector('#loadOptionsStatus');
+                    status.textContent = 'Consultando servicios...';
+                    status.style.color = '#fff';
+
+                    ApiClient.getJSON(ApiClient.getUrl('Acquisition/setup/options')).then(function (data) {
+                        if (!data) return;
+                        status.textContent = 'Opciones obtenidas. Guarda la configuración para aplicar los cambios.';
+                        status.style.color = '#5e5';
+
+                        renderDiscovered('Sonarr', data.Sonarr || data.sonarr, 1, '#sonarrRootsDiscovered', '#sonarrClientDiscovered', '#SonarrQualityProfileId', document.querySelector('#SonarrQualityProfileId').value);
+                        renderDiscovered('Radarr', data.Radarr || data.radarr, 0, '#radarrRootsDiscovered', '#radarrClientDiscovered', '#RadarrQualityProfileId', document.querySelector('#RadarrQualityProfileId').value);
+                    }).catch(function (err) {
+                        status.textContent = 'No se pudieron cargar las opciones' + (err && err.status ? ' (HTTP ' + err.status + ')' : '') + '.';
+                        status.style.color = '#e55';
+                    });
+                });
+            }
+
+            var form = page.querySelector('.acquisitionConfigForm');
+            if (form) {
+                form.addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    Dashboard.showLoadingMsg();
+
+                    ApiClient.getPluginConfiguration(AcquisitionConfig.pluginId).then(function (config) {
+                        config.Destinations = currentDestinations;
+                        config.SonarrUrl = document.querySelector('#SonarrUrl').value;
+                        config.SonarrApiKey = document.querySelector('#SonarrApiKey').value;
+                        config.SonarrQualityProfileId = parseInt(document.querySelector('#SonarrQualityProfileId').value, 10) || 0;
+                        config.SonarrCategory = document.querySelector('#SonarrCategory').value.trim();
+
+                        config.RadarrUrl = document.querySelector('#RadarrUrl').value;
+                        config.RadarrApiKey = document.querySelector('#RadarrApiKey').value;
+                        config.RadarrQualityProfileId = parseInt(document.querySelector('#RadarrQualityProfileId').value, 10) || 0;
+                        config.RadarrCategory = document.querySelector('#RadarrCategory').value.trim();
+
+                        config.ProwlarrUrl = document.querySelector('#ProwlarrUrl').value;
+                        config.ProwlarrApiKey = document.querySelector('#ProwlarrApiKey').value;
+
+                        config.QBittorrentUrl = document.querySelector('#QBittorrentUrl').value;
+                        config.QBittorrentUsername = document.querySelector('#QBittorrentUsername').value;
+                        config.QBittorrentPassword = document.querySelector('#QBittorrentPassword').value;
+
+                        config.PreferredResolution = document.querySelector('#PreferredResolution').value;
+                        config.PreferredSource = document.querySelector('#PreferredSource').value;
+                        config.PreferredCodec = document.querySelector('#PreferredCodec').value;
+                        config.MaxMovieSizeBytes = parseInt(document.querySelector('#MaxMovieSizeBytes').value, 10) || 15000000000;
+                        config.MaxEpisodeSizeBytes = parseInt(document.querySelector('#MaxEpisodeSizeBytes').value, 10) || 4000000000;
+
+                        config.ReleaseSelectionMode = document.querySelector('#ReleaseSelectionMode').value;
+                        config.SearchStyle = document.querySelector('#SearchStyle').value;
+                        config.RemoveTagsAfterImport = document.querySelector('#RemoveTagsAfterImport').checked;
+                        config.AllowAllUsers = document.querySelector('#AllowAllUsers').checked;
+                        var usersStr = document.querySelector('#AllowedUserIds').value;
+                        config.AllowedUserIds = usersStr ? usersStr.split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
+
+                        ApiClient.updatePluginConfiguration(AcquisitionConfig.pluginId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                        });
+                    });
+                    return false;
+                });
+            }
+        }
+    </script>
+</div>
+</body>
+</html>

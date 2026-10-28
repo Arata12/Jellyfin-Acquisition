@@ -1,0 +1,10 @@
+# Compilación
+bin/
+obj/
+*.user
+.vs/
+.idea/
+
+# Plugin compilado
+dist/
+artifacts/
