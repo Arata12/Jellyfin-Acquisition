@@ -11,6 +11,7 @@ using Jellyfin.Plugin.Acquisition.Adapters.Sonarr;
 using Jellyfin.Plugin.Acquisition.Catalog;
 using Jellyfin.Plugin.Acquisition.Hosted;
 using Jellyfin.Plugin.Acquisition.Releases;
+using Jellyfin.Plugin.Acquisition.Seerr;
 using Jellyfin.Plugin.Acquisition.Storage;
 using Jellyfin.Plugin.Acquisition.Tracking;
 using Jellyfin.Plugin.Acquisition.Web;
@@ -63,7 +64,18 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IReleaseService, ReleaseService>();
         serviceCollection.AddSingleton<ITrackerService, TrackerService>();
 
-        // 5. Background Tracking Worker
+        // 5. Seerr-compatible API (off unless enabled in the configuration)
+        serviceCollection.AddHttpClient<ISkyHookClient, SkyHookClient>()
+            .ConfigurePrimaryHttpMessageHandler(() => CreateLongLivedHandler())
+            .SetHandlerLifetime(Timeout.InfiniteTimeSpan);
+        serviceCollection.AddHttpClient<ITmdbClient, TmdbClient>()
+            .ConfigurePrimaryHttpMessageHandler(() => CreateLongLivedHandler())
+            .SetHandlerLifetime(Timeout.InfiniteTimeSpan);
+        serviceCollection.AddSingleton<ISeerrSessionStore, JsonFileSeerrSessionStore>();
+        serviceCollection.AddSingleton<SeerrLoginThrottle>();
+        serviceCollection.AddSingleton<ISeerrBridge, SeerrBridge>();
+
+        // 6. Background Tracking Worker
         serviceCollection.AddHostedService<AcquisitionHostedService>();
     }
 }

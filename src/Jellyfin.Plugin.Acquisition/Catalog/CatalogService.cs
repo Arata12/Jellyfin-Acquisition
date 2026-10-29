@@ -79,7 +79,7 @@ public class CatalogService : ICatalogService
         }
     }
 
-    public async Task<CatalogSearchResultDto> SearchCatalogWithDiagnosticsAsync(Guid userId, string query, CancellationToken ct = default)
+    public async Task<CatalogSearchResultDto> SearchCatalogWithDiagnosticsAsync(Guid userId, string query, CancellationToken ct = default, bool includeLocal = false)
     {
         var searchResult = new CatalogSearchResultDto();
 
@@ -98,7 +98,7 @@ public class CatalogService : ICatalogService
         {
             if (cached.Expiry > DateTimeOffset.UtcNow && cached.ConnectionFingerprint == currentFingerprint)
             {
-                var enrichedCached = await EnrichItemsWithLocalAndRequestStatusAsync(userId, cached.Items, filterOutLocal: true, ct).ConfigureAwait(false);
+                var enrichedCached = await EnrichItemsWithLocalAndRequestStatusAsync(userId, cached.Items, filterOutLocal: !includeLocal, ct).ConfigureAwait(false);
                 searchResult.Items = enrichedCached;
                 searchResult.TotalRemoteFound = cached.Items.Count;
                 searchResult.LocalMatchesCount = cached.Items.Count - enrichedCached.Count;
@@ -282,7 +282,7 @@ public class CatalogService : ICatalogService
             searchResult.IsPartial = true;
         }
 
-        var enriched = await EnrichItemsWithLocalAndRequestStatusAsync(userId, rawResults, filterOutLocal: true, ct).ConfigureAwait(false);
+        var enriched = await EnrichItemsWithLocalAndRequestStatusAsync(userId, rawResults, filterOutLocal: !includeLocal, ct).ConfigureAwait(false);
         searchResult.Items = enriched;
         searchResult.TotalRemoteFound = rawResults.Count;
         searchResult.LocalMatchesCount = rawResults.Count - enriched.Count;
@@ -520,7 +520,7 @@ public class CatalogService : ICatalogService
         return null;
     }
 
-    private string? RegisterImage(string? remoteUrl)
+    public string? RegisterImage(string? remoteUrl)
     {
         if (string.IsNullOrWhiteSpace(remoteUrl)) return null;
 

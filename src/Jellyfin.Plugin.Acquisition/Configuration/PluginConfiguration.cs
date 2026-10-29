@@ -142,6 +142,18 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool IsManualReleaseSelection() =>
         string.Equals(ReleaseSelectionMode?.Trim(), "manual", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Serve a Seerr-compatible API under /Acquisition/seerr so Seerr clients (plezy) can search and request through
+    /// the plugin. Off by default: it adds an anonymous login endpoint.
+    /// </summary>
+    public bool EnableSeerrApi { get; set; }
+
+    /// <summary>
+    /// Optional TMDB key (v3 API key or v4 read access token) for the Seerr API's discover rows and recommendations.
+    /// Search, details and requests work without it.
+    /// </summary>
+    public string TmdbApiKey { get; set; } = string.Empty;
+
     // Security & User Permissions
     public List<string> AllowedUserIds { get; set; } = [];
     public bool AllowAllUsers { get; set; } = false;

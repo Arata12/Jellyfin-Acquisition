@@ -964,7 +964,7 @@ public class AcquisitionController : ControllerBase
     private static RequestProgressDto BuildProgress(AcquisitionRequest r)
     {
         var active = r.GetActiveUnit();
-        var manual = Plugin.Instance?.Configuration.IsManualReleaseSelection() == true;
+        var manual = Plugin.Instance?.Configuration.IsManualReleaseSelection() == true && !r.AutoReleaseSelection;
         return new RequestProgressDto
         {
             Total = r.Units.Count,

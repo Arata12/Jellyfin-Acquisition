@@ -34,6 +34,12 @@ public class AcquisitionRequest
     /// </summary>
     public bool FollowAiring { get; set; }
 
+    /// <summary>
+    /// Always send the best release automatically, even in manual selection mode. Set on requests made from clients
+    /// that cannot show the release list (plezy through the Seerr-compatible API).
+    /// </summary>
+    public bool AutoReleaseSelection { get; set; }
+
     /// <summary>Next time a followed series is checked for newly aired episodes (null = as soon as possible).</summary>
     public DateTimeOffset? NextFollowCheckUtc { get; set; }
 

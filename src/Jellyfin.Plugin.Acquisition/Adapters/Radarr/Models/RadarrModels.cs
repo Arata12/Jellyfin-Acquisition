@@ -64,6 +64,26 @@ public class RadarrMovie
     [JsonPropertyName("images")]
     public List<RadarrImage> Images { get; set; } = [];
 
+    [JsonPropertyName("genres")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Genres { get; set; }
+
+    [JsonPropertyName("runtime")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Runtime { get; set; }
+
+    [JsonPropertyName("studio")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Studio { get; set; }
+
+    [JsonPropertyName("certification")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Certification { get; set; }
+
+    [JsonPropertyName("inCinemas")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTime? InCinemas { get; set; }
+
     [JsonPropertyName("addOptions")]
     public RadarrAddOptions? AddOptions { get; set; }
 }

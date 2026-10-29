@@ -142,6 +142,20 @@
                     <div class="fieldDescription">Los colores y medidas se pueden ajustar desde el CSS personalizado de Jellyfin con las variables --acquisition-accent, --acquisition-radius, --acquisition-surface y --acquisition-blur. Tras cambiarlo, recarga la página.</div>
                 </div>
 
+                <h2>API compatible con Seerr (plezy)</h2>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="EnableSeerrApi" name="EnableSeerrApi" />
+                        <span>Activar la API compatible con Seerr</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">Permite buscar y solicitar desde clientes con integración Seerr, como plezy, sin instalar Seerr. En plezy: Ajustes → Servicios → Seerr, con la URL <code id="SeerrApiUrl"></code> e inicio de sesión con la cuenta de Jellyfin (o Quick Connect). Las solicitudes respetan los permisos de abajo y siempre usan la selección automática de release.</div>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="TmdbApiKey">Clave de TMDB (opcional)</label>
+                    <input is="emby-input" type="password" id="TmdbApiKey" name="TmdbApiKey" />
+                    <div class="fieldDescription">Solo para las filas de Explorar (populares, tendencias, próximos estrenos) y las recomendaciones. Acepta la clave v3 o el token de lectura v4. Sin ella, la búsqueda y las solicitudes funcionan igual.</div>
+                </div>
+
                 <h2>Permisos</h2>
                 <div class="checkboxContainer">
                     <label>
@@ -236,6 +250,9 @@
                     document.querySelector('#RemoveTagsAfterImport').checked = config.RemoveTagsAfterImport !== false;
                     document.querySelector('#AllowAllUsers').checked = !!config.AllowAllUsers;
                     document.querySelector('#AllowedUserIds').value = (config.AllowedUserIds || []).join(', ');
+                    document.querySelector('#EnableSeerrApi').checked = !!config.EnableSeerrApi;
+                    document.querySelector('#TmdbApiKey').value = config.TmdbApiKey || '';
+                    document.querySelector('#SeerrApiUrl').textContent = ApiClient.serverAddress() + '/Acquisition/seerr';
 
                     currentDestinations = config.Destinations || [];
                     renderDestinations();
@@ -410,6 +427,8 @@
                         config.SearchStyle = document.querySelector('#SearchStyle').value;
                         config.RemoveTagsAfterImport = document.querySelector('#RemoveTagsAfterImport').checked;
                         config.AllowAllUsers = document.querySelector('#AllowAllUsers').checked;
+                        config.EnableSeerrApi = document.querySelector('#EnableSeerrApi').checked;
+                        config.TmdbApiKey = document.querySelector('#TmdbApiKey').value.trim();
                         var usersStr = document.querySelector('#AllowedUserIds').value;
                         config.AllowedUserIds = usersStr ? usersStr.split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
 

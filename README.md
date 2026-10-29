@@ -14,6 +14,7 @@ Plugin para **Jellyfin 12.2 – 12.4** que permite buscar y pedir series y pelí
 - **Series en emisión:** «Serie completa» sigue la serie y descarga los episodios nuevos según se emiten. Los episodios que pidas antes de su emisión esperan a que salgan.
 - **Compatible con qBittorrent 4.x y 5.x.** Cada torrent se marca con una etiqueta `acq-…` para seguirlo, que se borra cuando la descarga está importada (opcional).
 - **Estilo opcional** del buscador: clásico de Jellyfin o el del tema [Abyss](https://github.com/AumGupta/abyss-jellyfin), con detección automática.
+- **API compatible con Seerr (opcional):** clientes con integración Seerr, como [plezy](https://github.com/edde746/plezy), pueden buscar y pedir a través del plugin sin instalar Seerr. Ver [Clientes Seerr (plezy)](#clientes-seerr-plezy).
 
 ## Requisitos
 
@@ -87,6 +88,23 @@ Si usas Abyss, carga una versión fija del tema (un commit concreto) en lugar de
 - **Cancelar:** «Cancelar solicitud» deja de seguir la solicitud; lo que ya se envió a qBittorrent no se borra.
 
 El proceso continúa en el servidor aunque cierres el navegador.
+
+### Clientes Seerr (plezy)
+
+El plugin puede responder como un servidor Seerr, así que plezy (y otros clientes con integración Seerr) piden contenido al plugin directamente. No hace falta instalar Seerr.
+
+1. En la configuración del plugin, activa **«API compatible con Seerr»**. Opcionalmente, añade una **clave de TMDB** para las filas de Explorar (populares, tendencias, próximos estrenos) y las recomendaciones. Sin ella, la búsqueda y las solicitudes funcionan igual.
+2. En plezy: **Ajustes → Servicios → Seerr**, con la URL `https://tu-dominio[/jellyfin]/Acquisition/seerr`.
+3. Inicia sesión con tu usuario y contraseña de Jellyfin, o con Quick Connect.
+
+Qué cambia respecto a la interfaz web:
+
+- **Temporadas:** se piden por temporadas o la serie completa (que sigue la emisión), en la numeración de Sonarr (TVDB). Los episodios sueltos y la elección manual de release solo están en la web.
+- **Selección de release:** las solicitudes hechas desde plezy usan siempre la selección automática, aunque el plugin esté en modo manual.
+- **Destino:** si hay varios destinos, se eligen en «Avanzado».
+- **Episodios por temporada:** para las series que aún no están en Sonarr, el plugin los lee del servicio de metadatos de Sonarr (`skyhook.sonarr.tv`), así que Jellyfin necesita salida a internet.
+
+Las solicitudes respetan los permisos del plugin y se pueden seguir y gestionar desde Jellyfin como cualquier otra.
 
 ## Solución de problemas
 

@@ -485,7 +485,7 @@ public class TrackerService : ITrackerService
         }
 
         // 1. Find releases if none selected
-        var manual = config?.IsManualReleaseSelection() == true;
+        var manual = config?.IsManualReleaseSelection() == true && !request.AutoReleaseSelection;
         if (activeUnit != null && activeUnit.SelectedRelease == null)
         {
             // Manual mode: a recent list with eligible releases is already waiting for the user's choice
