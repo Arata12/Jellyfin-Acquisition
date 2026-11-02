@@ -7,6 +7,7 @@ Plugin para **Jellyfin 12.2 – 12.4** que permite buscar y pedir series y pelí
 - **Buscador ampliado:** al buscar en Jellyfin aparece un bloque «Fuera de tu biblioteca» con los resultados de Sonarr y Radarr que aún no tienes, debajo de los resultados locales.
 - **Solicitudes desde la ficha:** elige destino (carpeta raíz de Sonarr/Radarr), serie completa o episodios concretos, y sigue el estado de la descarga sin salir de Jellyfin.
 - **Botón «Solicitar faltantes»** en la ficha de las series que ya tienes, para pedir los episodios que faltan.
+- **Identificación por ID:** el ID (TVDB, TMDB o IMDb) decide si una release es del título pedido, por encima del nombre y de las semillas. Una release etiquetada con otro ID se descarta aunque el nombre coincida, y una con el ID correcto vale aunque el nombre esté en otro idioma. Ver [Cómo se identifica cada release](#cómo-se-identifica-cada-release).
 - **Selección de release automática o manual:**
   - *Automática:* entre las releases válidas gana la que mejor encaja con tus preferencias (resolución, fuente y códec) y, a igual calidad, la de más semillas.
   - *Manual:* el plugin busca y te deja la lista; no se descarga nada hasta que eliges.
@@ -27,6 +28,44 @@ Plugin para **Jellyfin 12.2 – 12.4** que permite buscar y pedir series y pelí
 | qBittorrent | 4.x o 5.x, con la interfaz web activada |
 
 Sonarr y Radarr son independientes: puedes usar solo uno de los dos. Jellyfin debe poder conectar con todos los servicios por red.
+
+## Configurar Sonarr y Radarr
+
+El plugin usa Sonarr y Radarr para dar de alta los títulos e importar las descargas, así que necesitan esta configuración. Lo que se indica para Sonarr vale igual para Radarr salvo donde se dice otra cosa.
+
+### 1. Cliente de descarga y categoría
+
+En **Ajustes → Clientes de descarga**, añade el **mismo qBittorrent** que configuras en el plugin, activado y con una **categoría** propia (por ejemplo `tv-sonarr` en Sonarr y `radarr` en Radarr).
+
+- El plugin envía cada torrent con esa categoría, y Sonarr/Radarr solo importan lo que está en su categoría. Si dejas vacía la categoría en el plugin, la lee de aquí.
+- Si tienes varios clientes qBittorrent, el plugin usa el que apunta al mismo host y puerto que su conexión. Si no hay ninguno o hay más de uno, indica la categoría a mano en el plugin.
+- No desactives la **gestión de descargas completadas** (*Completed Download Handling*, activa por defecto): es la que importa las descargas. Si a los 10 minutos no la han importado, el plugin pide una importación manual, y a los 60 minutos marca la descarga para revisión.
+- Si qBittorrent ve las descargas en otra ruta que Sonarr/Radarr (contenedores con montajes distintos), añade un **mapeo de rutas remotas** en **Ajustes → Clientes de descarga → Remote Path Mappings**.
+
+### 2. Carpetas de serie y película con el ID (importante)
+
+Jellyfin identifica cada carpeta nueva **por su nombre** si no lleva un ID. Sonarr nombra por defecto las carpetas de serie solo con el título (`{Series Title}`), así que una serie como *Girlfriend, Girlfriend* puede acabar identificada en Jellyfin como otra (*The Girlfriend Experience*). El plugin comprueba la disponibilidad por ID, de modo que la solicitud se queda en «Importando» y a los 15 minutos pasa a «Requiere atención».
+
+Pon el ID en el nombre de la carpeta. Jellyfin lo reconoce y no tiene que adivinar:
+
+| Servicio | Dónde | Formato recomendado |
+|---|---|---|
+| Sonarr | Ajustes → Gestión de medios → **Formato de carpeta de serie** | `{Series TitleYear} [tvdbid-{TvdbId}]` |
+| Radarr | Ajustes → Gestión de medios → **Formato de carpeta de película** | `{Movie CleanTitle} ({Release Year}) [tmdbid-{TmdbId}]` |
+
+El formato solo se aplica a las series y películas que se den de alta a partir de ese momento. Para mover una que ya existe, edita su ruta en Sonarr/Radarr y acepta mover los archivos.
+
+### 3. Carpetas raíz, tipos de serie y bibliotecas de Jellyfin
+
+- Crea en **Ajustes → Gestión de medios → Carpetas raíz** las carpetas que vas a ofrecer (por ejemplo `/data/tv/series`, `/data/tv/anime` y `/data/movies`) y añádelas como **destinos** en el plugin.
+- Para anime, usa una carpeta raíz propia y un destino de tipo `anime`. Así Sonarr usa la numeración absoluta (`- 01`) habitual en las releases de anime.
+- Cada carpeta raíz debe estar dentro de una **biblioteca de Jellyfin** del tipo correcto (series o películas) y Jellyfin debe verla **en la misma ruta** que Sonarr/Radarr (los mismos montajes en Docker). Así el plugin pide a Jellyfin que revise solo esa carpeta. Si las rutas no coinciden, el plugin lanza un escaneo completo de la biblioteca como mucho cada 10 minutos, que es más lento.
+
+### 4. Indexadores y búsquedas
+
+Sonarr y Radarr **no necesitan indexadores** ni sincronizarse con Prowlarr: el plugin busca en Prowlarr por su cuenta y da de alta los títulos sin monitorizar y sin búsqueda automática, de modo que Sonarr/Radarr no descargan nada por su lado para ellos. Si ya los usas con sus propios indexadores, el plugin no interfiere.
+
+En Prowlarr, los indexadores que admiten **búsqueda por ID** (TVDB/TMDB/IMDb) mejoran la identificación de las releases. No son obligatorios.
 
 ## Instalación
 
@@ -106,9 +145,24 @@ Qué cambia respecto a la interfaz web:
 
 Las solicitudes respetan los permisos del plugin y se pueden seguir y gestionar desde Jellyfin como cualquier otra.
 
+### Cómo se identifica cada release
+
+Para cada release se decide si es del título pedido en este orden, y la primera regla que se cumple manda:
+
+1. **IDs que publica el indexador** (TVDB, TMDB, IMDb): si alguno es distinto, la release se descarta aunque el nombre coincida; si coinciden, vale aunque el nombre sea otro.
+2. **Sonarr/Radarr** reconocen la release como el título pedido o como otro de su biblioteca (usan sus nombres de escena).
+3. **Búsqueda por ID en Prowlarr:** lo que devuelve un indexador al buscar por el ID del título.
+4. **Nombre:** el título pedido o uno de sus **otros nombres obtenidos a partir del ID** (romaji, nombres de escena, traducciones). Una serie que solo comparte palabras, como *Rent-a-Girlfriend* al pedir *Girlfriend, Girlfriend*, nunca entra.
+
+Entre las releases válidas se elige por calidad y, a igual calidad, por semillas. Una release de otro título nunca aparece por encima de una del título pedido, tenga las semillas que tenga. Si con el nombre pedido no sale nada válido, el plugin repite la búsqueda con hasta dos de esos otros nombres.
+
+Los otros nombres se leen de Sonarr y Radarr, del servicio de metadatos de Sonarr (`skyhook.sonarr.tv`), de [AniList](https://anilist.co) (solo anime, a partir de los IDs de MyAnimeList que da TVDB) y de TMDB si has configurado una clave. Jellyfin necesita salida a internet para consultarlos; si no la tiene, la identificación sigue funcionando con los pasos 1 a 3 y el nombre pedido.
+
 ## Solución de problemas
 
 - **No aparece el bloque «Fuera de tu biblioteca»:** algunos bloqueadores de anuncios impiden que se cargue; añade tu dominio a sus excepciones. Tras actualizar el plugin, recarga la página con Ctrl+Shift+R una vez.
+- **Una solicitud se queda en «Importando» y luego pasa a «Requiere atención» aunque Sonarr/Radarr ya importaron el archivo:** Jellyfin identificó la carpeta como otro título. Usa carpetas con el ID (ver [Carpetas de serie y película con el ID](#2-carpetas-de-serie-y-película-con-el-id-importante)) o corrígelo con «Identificar» en Jellyfin.
+- **La descarga termina pero Sonarr/Radarr no la importan:** revisa la categoría del cliente qBittorrent, la gestión de descargas completadas, los mapeos de rutas remotas y la cola de actividad de Sonarr/Radarr, que indica el motivo (ver [Configurar Sonarr y Radarr](#configurar-sonarr-y-radarr)).
 - **Una solicitud se queda en «Requiere atención»:** el modal muestra el motivo (perfil técnico sin elegir, categoría de qBittorrent, carpeta raíz eliminada, etc.). Corrígelo y pulsa «Reintentar».
 - **Registros:** los mensajes del plugin aparecen en el log de Jellyfin con el prefijo `Jellyfin.Plugin.Acquisition`.
 
