@@ -11,6 +11,11 @@ using Jellyfin.Plugin.Acquisition.Catalog;
 using Jellyfin.Plugin.Acquisition.Models;
 using Jellyfin.Plugin.Acquisition.Seerr;
 using Jellyfin.Plugin.Acquisition.Storage;
+using Jellyfin.Plugin.Acquisition.Tracking;
+using Jellyfin.Plugin.Acquisition.Releases;
+using Jellyfin.Plugin.Acquisition.Adapters.Prowlarr;
+using Jellyfin.Plugin.Acquisition.Adapters.QBittorrent;
+using MediaBrowser.Controller.Library;
 
 namespace Jellyfin.Plugin.Acquisition.Tests;
 
@@ -253,6 +258,47 @@ public class SeerrApiTests : IDisposable
         Assert.False(request.Scope.All);
         Assert.False(request.FollowAiring);
         Assert.Equal([1, 3], request.Scope.SeasonNumbers);
+    }
+
+    [Fact]
+    public async Task CreateRequest_OtherSeasonsOfASeriesInProgress_AreAddedToThatRequest()
+    {
+        var sonarr = new Mock<ISonarrClient>();
+        sonarr.Setup(s => s.LookupSeriesWithDiagnosticsAsync("tmdb:1396", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SonarrLookupResult { Items = [new SonarrSeries { Title = "Breaking Bad", Year = 2008, TvdbId = 81189, TmdbId = 1396, ImdbId = "tt0903747" }] });
+        sonarr.Setup(s => s.GetEpisodesAsync(7, It.IsAny<CancellationToken>())).ReturnsAsync(
+        [
+            new SonarrEpisode { Id = 11, SeasonNumber = 1, EpisodeNumber = 1, AirDateUtc = DateTime.UtcNow.AddYears(-10) },
+            new SonarrEpisode { Id = 12, SeasonNumber = 1, EpisodeNumber = 2, AirDateUtc = DateTime.UtcNow.AddYears(-10) },
+            new SonarrEpisode { Id = 51, SeasonNumber = 5, EpisodeNumber = 1, AirDateUtc = DateTime.UtcNow.AddYears(-5) }
+        ]);
+        var repo = new JsonFileRequestRepository(_appPaths.Object, Mock.Of<ILogger<JsonFileRequestRepository>>());
+        var existing = new AcquisitionRequest
+        {
+            Kind = MediaKind.Series,
+            Title = "Breaking Bad",
+            ArrId = 7,
+            ProviderIds = new ProviderIds { Tvdb = "81189", Tmdb = "1396" },
+            Scope = new RequestScope { SeasonNumbers = [5] },
+            Units = [new DownloadUnit { SeasonNumber = 5, EpisodeNumbers = [1], EpisodeIds = [51], Status = RequestStatus.Downloading }]
+        };
+        existing.AddHistory(RequestStatus.Downloading, "Descargando la última temporada.");
+        await repo.SaveOrUpdateAsync(existing);
+
+        var tracker = new TrackerService(repo, sonarr.Object, Mock.Of<IRadarrClient>(), Mock.Of<IProwlarrClient>(), Mock.Of<IQBittorrentClient>(),
+            Mock.Of<IReleaseService>(), Mock.Of<ILocalMatcherService>(), Mock.Of<ILibraryManager>(), Mock.Of<ILogger<TrackerService>>());
+        var bridge = new SeerrBridge(sonarr.Object, Mock.Of<IRadarrClient>(), Mock.Of<ICatalogService>(), Mock.Of<ILocalMatcherService>(), repo,
+            Mock.Of<ISkyHookClient>(), Mock.Of<ILogger<SeerrBridge>>(), tracker);
+
+        var created = await bridge.CreateRequestAsync(Guid.NewGuid(), new SeerrCreateRequestDto { MediaType = "tv", MediaId = 1396, Seasons = Json("[1]") });
+
+        var request = Assert.Single(await repo.GetAllAsync());
+        Assert.Equal(existing.Id, request.Id);
+        Assert.Equal([1, 5], request.Scope.SeasonNumbers);
+        Assert.Equal([11, 12], request.Units.Single(u => u.SeasonNumber == 1).EpisodeIds);
+        Assert.Equal(RequestStatus.Downloading, request.Status);
+        Assert.Equal(SeerrBridge.StableId(existing.Id), created.Id);
+        Assert.Equal([1, 5], created.Seasons!.Select(s => s.SeasonNumber));
     }
 
     [Fact]

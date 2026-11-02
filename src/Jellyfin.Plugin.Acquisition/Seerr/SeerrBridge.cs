@@ -11,6 +11,7 @@ using Jellyfin.Plugin.Acquisition.Controllers.Dtos;
 using Jellyfin.Plugin.Acquisition.Models;
 using Jellyfin.Plugin.Acquisition.Registration;
 using Jellyfin.Plugin.Acquisition.Storage;
+using Jellyfin.Plugin.Acquisition.Tracking;
 
 namespace Jellyfin.Plugin.Acquisition.Seerr;
 
@@ -57,6 +58,7 @@ public class SeerrBridge : ISeerrBridge
     private readonly ILocalMatcherService _localMatcher;
     private readonly IRequestRepository _requestRepo;
     private readonly ISkyHookClient _skyHook;
+    private readonly ITrackerService? _tracker;
     private readonly ILogger<SeerrBridge> _logger;
 
     public SeerrBridge(
@@ -66,7 +68,8 @@ public class SeerrBridge : ISeerrBridge
         ILocalMatcherService localMatcher,
         IRequestRepository requestRepo,
         ISkyHookClient skyHook,
-        ILogger<SeerrBridge> logger)
+        ILogger<SeerrBridge> logger,
+        ITrackerService? tracker = null)
     {
         _sonarrClient = sonarrClient;
         _radarrClient = radarrClient;
@@ -74,6 +77,7 @@ public class SeerrBridge : ISeerrBridge
         _localMatcher = localMatcher;
         _requestRepo = requestRepo;
         _skyHook = skyHook;
+        _tracker = tracker;
         _logger = logger;
     }
 
@@ -384,6 +388,31 @@ public class SeerrBridge : ISeerrBridge
         if (existing == null && !string.IsNullOrWhiteSpace(ids.Imdb))
         {
             existing = await _requestRepo.FindActiveByExternalIdAsync(kind, "imdb", ids.Imdb, ct).ConfigureAwait(false);
+        }
+
+        if (existing != null && kind == MediaKind.Series && _tracker != null)
+        {
+            // One request per series (user decision): other seasons are added to the request already in progress
+            var addition = await _tracker.AddToRequestAsync(existing.Id, scope.All, scope.SeasonNumbers, [], _ => true, ct).ConfigureAwait(false);
+            if (addition.Outcome is not (AddScopeOutcome.Added or AddScopeOutcome.AlreadyCovered))
+            {
+                var status = addition.Outcome == AddScopeOutcome.Unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status400BadRequest;
+                throw new SeerrApiException(status, addition.Message ?? "No se pudieron añadir las temporadas a la solicitud.");
+            }
+
+            return new SeerrRequestDto
+            {
+                Id = StableId(existing.Id),
+                Status = SeerrRequestStatus.Approved,
+                Media = new SeerrMediaInfoDto
+                {
+                    Id = body.MediaId,
+                    TmdbId = body.MediaId,
+                    TvdbId = int.TryParse(ids.Tvdb, out var existingTvdb) ? existingTvdb : null,
+                    Status = SeerrMediaStatus.Processing
+                },
+                Seasons = (addition.Request ?? existing).Scope.SeasonNumbers.Select(n => new SeerrRequestSeasonDto { SeasonNumber = n }).ToList()
+            };
         }
 
         if (existing != null)

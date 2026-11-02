@@ -330,42 +330,11 @@ public class TrackerService : ITrackerService
             // Build units for series
             if (request.Units.Count == 0 && request.Scope.TargetEpisodes.Count > 0)
             {
-                var bySeason = request.Scope.TargetEpisodes.GroupBy(t => t.SeasonNumber).OrderBy(g => g.Key);
-                foreach (var seasonGroup in bySeason)
-                {
-                    var isSeasonSelected = request.Scope.All || request.Scope.SeasonNumbers.Contains(seasonGroup.Key);
-                    var isAiring = allEpisodes.Any(e => e.SeasonNumber == seasonGroup.Key && (!e.AirDateUtc.HasValue || e.AirDateUtc.Value > now));
-
-                    if (isSeasonSelected && seasonGroup.Count() > 1 && !isAiring)
-                    {
-                        var ordered = seasonGroup.OrderBy(e => e.EpisodeNumber).ToList();
-                        request.Units.Add(new DownloadUnit
-                        {
-                            SeasonNumber = seasonGroup.Key,
-                            EpisodeNumbers = ordered.Select(e => e.EpisodeNumber).ToList(),
-                            EpisodeIds = ordered.Select(e => e.EpisodeId).ToList(),
-                            AbsoluteEpisodeNumbers = ordered.Where(e => e.AbsoluteEpisodeNumber.HasValue).Select(e => e.AbsoluteEpisodeNumber!.Value).ToList(),
-                            IsFullSeasonPack = true,
-                            Status = RequestStatus.Pending
-                        });
-                    }
-                    else
-                    {
-                        foreach (var ep in seasonGroup.OrderBy(e => e.EpisodeNumber))
-                        {
-                            request.Units.Add(new DownloadUnit
-                            {
-                                SeasonNumber = ep.SeasonNumber,
-                                EpisodeNumbers = [ep.EpisodeNumber],
-                                EpisodeIds = [ep.EpisodeId],
-                                AbsoluteEpisodeNumbers = ep.AbsoluteEpisodeNumber.HasValue ? [ep.AbsoluteEpisodeNumber.Value] : [],
-                                AirDateUtc = ep.AirDateUtc,
-                                IsFullSeasonPack = false,
-                                Status = RequestStatus.Pending
-                            });
-                        }
-                    }
-                }
+                request.Units.AddRange(BuildSeriesUnits(
+                    request.Scope.TargetEpisodes,
+                    season => request.Scope.All || request.Scope.SeasonNumbers.Contains(season),
+                    allEpisodes,
+                    now));
             }
         }
         else if (request.Kind == MediaKind.Movie)
@@ -385,6 +354,51 @@ public class TrackerService : ITrackerService
         await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
 
         await HandleSearchingAsync(request, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Download units for the target episodes: a selected season that has finished airing is one season pack, the rest
+    /// one unit per episode, in season and episode order.
+    /// </summary>
+    private static List<DownloadUnit> BuildSeriesUnits(IEnumerable<EpisodeTarget> targets, Func<int, bool> isSeasonSelected, IReadOnlyList<SonarrEpisode> allEpisodes, DateTime now)
+    {
+        var units = new List<DownloadUnit>();
+        foreach (var seasonGroup in targets.GroupBy(t => t.SeasonNumber).OrderBy(g => g.Key))
+        {
+            var isAiring = allEpisodes.Any(e => e.SeasonNumber == seasonGroup.Key && (!e.AirDateUtc.HasValue || e.AirDateUtc.Value > now));
+
+            if (isSeasonSelected(seasonGroup.Key) && seasonGroup.Count() > 1 && !isAiring)
+            {
+                var ordered = seasonGroup.OrderBy(e => e.EpisodeNumber).ToList();
+                units.Add(new DownloadUnit
+                {
+                    SeasonNumber = seasonGroup.Key,
+                    EpisodeNumbers = ordered.Select(e => e.EpisodeNumber).ToList(),
+                    EpisodeIds = ordered.Select(e => e.EpisodeId).ToList(),
+                    AbsoluteEpisodeNumbers = ordered.Where(e => e.AbsoluteEpisodeNumber.HasValue).Select(e => e.AbsoluteEpisodeNumber!.Value).ToList(),
+                    IsFullSeasonPack = true,
+                    Status = RequestStatus.Pending
+                });
+            }
+            else
+            {
+                foreach (var ep in seasonGroup.OrderBy(e => e.EpisodeNumber))
+                {
+                    units.Add(new DownloadUnit
+                    {
+                        SeasonNumber = ep.SeasonNumber,
+                        EpisodeNumbers = [ep.EpisodeNumber],
+                        EpisodeIds = [ep.EpisodeId],
+                        AbsoluteEpisodeNumbers = ep.AbsoluteEpisodeNumber.HasValue ? [ep.AbsoluteEpisodeNumber.Value] : [],
+                        AirDateUtc = ep.AirDateUtc,
+                        IsFullSeasonPack = false,
+                        Status = RequestStatus.Pending
+                    });
+                }
+            }
+        }
+
+        return units;
     }
 
     private static EpisodeTarget ToTarget(int seriesId, SonarrEpisode e) => new()
@@ -1552,6 +1566,134 @@ public class TrackerService : ITrackerService
             return new RetryResult(RetryOutcome.Success, request);
         }
     }
+
+    public async Task<AddScopeResult> AddToRequestAsync(string requestId, bool all, IReadOnlyCollection<int> seasonNumbers, IReadOnlyCollection<int> episodeIds, Func<AcquisitionRequest, bool> canManage, CancellationToken ct = default)
+    {
+        using (await AcquireLockAsync(requestId, ct).ConfigureAwait(false))
+        {
+            var request = await _requestRepo.GetByIdAsync(requestId, ct).ConfigureAwait(false);
+            if (request == null)
+            {
+                return new AddScopeResult(AddScopeOutcome.NotFound, null);
+            }
+
+            if (!canManage(request))
+            {
+                return new AddScopeResult(AddScopeOutcome.Forbidden, request);
+            }
+
+            if (request.Kind != MediaKind.Series || !request.IsActive)
+            {
+                return new AddScopeResult(AddScopeOutcome.Invalid, request, "Solo se pueden añadir episodios a una solicitud de serie en curso.");
+            }
+
+            if (request.Scope.All && request.FollowAiring)
+            {
+                return new AddScopeResult(AddScopeOutcome.AlreadyCovered, request, "La serie completa ya está solicitada.");
+            }
+
+            var seasons = seasonNumbers.Where(n => n >= 0).ToHashSet();
+            var ids = episodeIds.ToHashSet();
+            if (!all && seasons.Count == 0 && ids.Count == 0)
+            {
+                return new AddScopeResult(AddScopeOutcome.Invalid, request, "Elige al menos una temporada o un episodio.");
+            }
+
+            if (!request.ArrId.HasValue)
+            {
+                // Not registered in Sonarr yet: the selection is resolved into episodes when the request is processed
+                MergeScope(request, all, seasons, ids);
+                request.AddHistory(request.Status, "Se amplió la selección de la solicitud.");
+                await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+                return new AddScopeResult(AddScopeOutcome.Added, request);
+            }
+
+            var episodes = await _sonarrClient.GetEpisodesAsync(request.ArrId.Value, ct).ConfigureAwait(false);
+            if (episodes == null)
+            {
+                return new AddScopeResult(AddScopeOutcome.Unavailable, request, "Sonarr no está disponible; inténtalo de nuevo en unos minutos.");
+            }
+
+            var now = DateTime.UtcNow;
+            var cutoff = now - DownloadUnit.ReleaseGrace;
+            var known = request.Units.SelectMany(u => u.EpisodeIds).Concat(request.Scope.TargetEpisodes.Select(t => t.EpisodeId)).ToHashSet();
+            var wanted = episodes
+                .Where(e => !e.HasFile && !known.Contains(e.Id) &&
+                            (all ? e.SeasonNumber > 0 && HasAired(e, episodes, cutoff) : seasons.Contains(e.SeasonNumber) || ids.Contains(e.Id)))
+                .OrderBy(e => e.SeasonNumber).ThenBy(e => e.EpisodeNumber)
+                .ToList();
+
+            MergeScope(request, all, seasons, ids);
+            if (wanted.Count == 0)
+            {
+                if (!all)
+                {
+                    return new AddScopeResult(AddScopeOutcome.AlreadyCovered, request, "Lo elegido ya está solicitado o en la biblioteca.");
+                }
+
+                // Nothing aired is missing: following the series is what was added
+                request.AddHistory(request.Status, "Solicitud ampliada a la serie completa: se seguirá la emisión.");
+                await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+                return new AddScopeResult(AddScopeOutcome.Added, request);
+            }
+
+            var targets = wanted.Select(e => ToTarget(request.ArrId.Value, e)).ToList();
+            request.Scope.TargetEpisodes.AddRange(targets);
+            var added = DescribeAddition(targets, season => all || seasons.Contains(season));
+
+            if (request.Units.Count == 0)
+            {
+                // Downloads not planned yet: the request builds them from its target episodes
+                request.AddHistory(request.Status, $"Añadido a la solicitud: {added}.");
+            }
+            else
+            {
+                // A season already partly requested is completed episode by episode, never with a pack of the whole season
+                var knownSeasons = episodes.Where(e => known.Contains(e.Id)).Select(e => e.SeasonNumber).ToHashSet();
+                var newUnits = BuildSeriesUnits(targets, season => (all || seasons.Contains(season)) && !knownSeasons.Contains(season), episodes, now);
+
+                // After what was already queued, but before episodes still waiting to air, so they do not hold it back
+                var waitingToAir = request.Units.FindIndex(u => u.Status == RequestStatus.Pending && u.SelectedRelease == null && u.SearchableFromUtc > now);
+                request.Units.InsertRange(waitingToAir >= 0 ? waitingToAir : request.Units.Count, newUnits);
+
+                var inProgress = request.Units.Any(u => u.Status is RequestStatus.Searching or RequestStatus.Downloading or RequestStatus.Importing);
+                if (!inProgress && request.Status != RequestStatus.Pending)
+                {
+                    // Finished, following, waiting for Jellyfin or only downloads set aside are left: start on the new ones
+                    request.ImportingStartedAt = null;
+                    request.CompletedAt = null;
+                    request.NextAttemptUtc = null;
+                    request.AddHistory(RequestStatus.Searching, $"Añadido a la solicitud: {added}. Iniciando búsqueda.");
+                }
+                else
+                {
+                    request.AddHistory(request.Status, $"Añadido a la solicitud: {added}. Se descargará después de lo que está en curso.");
+                }
+            }
+
+            await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+            return new AddScopeResult(AddScopeOutcome.Added, request);
+        }
+    }
+
+    private static void MergeScope(AcquisitionRequest request, bool all, IEnumerable<int> seasons, IEnumerable<int> episodeIds)
+    {
+        if (all)
+        {
+            request.Scope.All = true;
+            request.FollowAiring = true;
+            request.NextFollowCheckUtc = null;
+        }
+
+        request.Scope.SeasonNumbers = request.Scope.SeasonNumbers.Union(seasons).Order().ToList();
+        request.Scope.EpisodeIds = request.Scope.EpisodeIds.Union(episodeIds).ToList();
+    }
+
+    /// <summary>"Temporada 1, S02E03" for history messages.</summary>
+    private static string DescribeAddition(List<EpisodeTarget> targets, Func<int, bool> wholeSeason) =>
+        string.Join(", ", targets.GroupBy(t => t.SeasonNumber).OrderBy(g => g.Key).SelectMany(g => wholeSeason(g.Key)
+            ? [$"Temporada {g.Key}"]
+            : g.OrderBy(t => t.EpisodeNumber).Select(t => $"S{t.SeasonNumber:D2}E{t.EpisodeNumber:D2}")));
 
     public async Task<RetryResult> RetryRequestAsync(string requestId, Func<AcquisitionRequest, bool> canManage, CancellationToken ct = default)
     {

@@ -417,6 +417,42 @@ public class AcquisitionController : ControllerBase
     }
 
     /// <summary>
+    /// Adds seasons or episodes to a series request that is already in progress (one request per series).
+    /// </summary>
+    [HttpPost("requests/{id}/add")]
+    [Authorize]
+    [ProducesResponseType(typeof(AcquisitionRequestDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<AcquisitionRequestDto>> AddToRequest([FromRoute] string id, [FromBody] ScopeConfirmationDto addition, CancellationToken ct)
+    {
+        var userId = GetValidatedUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        // Anyone allowed to request content can extend the series request instead of opening a second one
+        var config = Plugin.Instance?.Configuration;
+        if (!SecurityHelper.CanAcquire(userId.Value, _userManager, config))
+        {
+            return Forbid();
+        }
+
+        var episodeIds = (addition.EpisodeIds ?? []).Concat((addition.TargetEpisodes ?? []).Select(t => t.EpisodeId)).Where(e => e > 0).Distinct().ToList();
+        var result = await _trackerService.AddToRequestAsync(id, addition.All, addition.SeasonNumbers ?? [], episodeIds, _ => true, ct).ConfigureAwait(false);
+        return result.Outcome switch
+        {
+            AddScopeOutcome.Added => Ok(MapToDto(result.Request!)),
+            AddScopeOutcome.NotFound => NotFound(),
+            AddScopeOutcome.Forbidden => Forbid(),
+            AddScopeOutcome.AlreadyCovered => Conflict(new ErrorResponseDto { Message = result.Message ?? "Ya está solicitado." }),
+            AddScopeOutcome.Unavailable => StatusCode(StatusCodes.Status503ServiceUnavailable, new ErrorResponseDto { Message = result.Message ?? "Sonarr no está disponible." }),
+            _ => BadRequest(new ErrorResponseDto { Message = result.Message ?? "No se pudo ampliar la solicitud." })
+        };
+    }
+
+    /// <summary>
     /// Get status of an acquisition request.
     /// </summary>
     [HttpGet("requests/{id}")]

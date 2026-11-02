@@ -11,6 +11,7 @@ Plugin para **Jellyfin 12.2 – 12.4** que permite buscar y pedir series y pelí
 - **Selección de release automática o manual:**
   - *Automática:* entre las releases válidas gana la que mejor encaja con tus preferencias (resolución, fuente y códec) y, a igual calidad, la de más semillas.
   - *Manual:* el plugin busca y te deja la lista; no se descarga nada hasta que eliges.
+- **Una solicitud por serie:** si pides otras temporadas o episodios de una serie que ya se está descargando, se añaden a esa misma solicitud en vez de rechazarse.
 - **Series de varios episodios:** se procesan de uno en uno; si uno falla, queda apartado con su motivo y se continúa con el siguiente. «Reintentar» vuelve a poner en cola los apartados.
 - **Series en emisión:** «Serie completa» sigue la serie y descarga los episodios nuevos según se emiten. Los episodios que pidas antes de su emisión esperan a que salgan.
 - **Compatible con qBittorrent 4.x y 5.x.** Cada torrent se marca con una etiqueta `acq-…` para seguirlo, que se borra cuando la descarga está importada (opcional).
@@ -123,6 +124,7 @@ Si usas Abyss, carga una versión fija del tema (un commit concreto) en lugar de
 
 - **Pedir algo nuevo:** busca en Jellyfin, abre una tarjeta de «Fuera de tu biblioteca», elige destino y pulsa «Añadir a biblioteca». En series puedes pedir la serie completa o elegir episodios.
 - **Ver el estado:** vuelve a abrir la tarjeta (o la ficha de la serie) para ver el estado, el resumen de descargas y los motivos de lo que necesite atención.
+- **Pedir más de una serie en curso:** en el estado de la solicitud, «Añadir temporadas o episodios» deja elegir más temporadas o episodios, o la serie completa. Lo ya pedido aparece marcado como «Ya solicitado». Lo nuevo se descarga después de lo que ya estaba en cola.
 - **Elegir release:** en modo manual, o cuando una descarga necesita atención, usa «Seleccionar release».
 - **Cancelar:** «Cancelar solicitud» deja de seguir la solicitud; lo que ya se envió a qBittorrent no se borra.
 
@@ -139,6 +141,7 @@ El plugin puede responder como un servidor Seerr, así que plezy (y otros client
 Qué cambia respecto a la interfaz web:
 
 - **Temporadas:** se piden por temporadas o la serie completa (que sigue la emisión), en la numeración de Sonarr (TVDB). Los episodios sueltos y la elección manual de release solo están en la web.
+- **Más temporadas de una serie en curso:** si ya pediste, por ejemplo, la última temporada y luego pides las anteriores, se añaden a la misma solicitud y se descargan después.
 - **Selección de release:** las solicitudes hechas desde plezy usan siempre la selección automática, aunque el plugin esté en modo manual.
 - **Destino:** si hay varios destinos, se eligen en «Avanzado».
 - **Episodios por temporada:** para las series que aún no están en Sonarr, el plugin los lee del servicio de metadatos de Sonarr (`skyhook.sonarr.tv`), así que Jellyfin necesita salida a internet.

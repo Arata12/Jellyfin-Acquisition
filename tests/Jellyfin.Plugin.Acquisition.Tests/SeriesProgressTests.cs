@@ -325,6 +325,129 @@ public class SeriesProgressTests
 
     // ---- Summary shown in the modal ----
 
+    // ---- One request per series: more seasons are added to the one in progress ----
+
+    private static SonarrEpisode Ep(int id, int season, int episode, bool hasFile = false, int airedDaysAgo = 30) =>
+        new() { Id = id, SeasonNumber = season, EpisodeNumber = episode, HasFile = hasFile, AirDateUtc = DateTime.UtcNow.AddDays(-airedDaysAgo) };
+
+    private static Mock<ISonarrClient> SonarrWith(params SonarrEpisode[] episodes)
+    {
+        var sonarr = new Mock<ISonarrClient>();
+        sonarr.Setup(s => s.GetEpisodesAsync(1, It.IsAny<CancellationToken>())).ReturnsAsync([.. episodes]);
+        return sonarr;
+    }
+
+    [Fact]
+    public async Task AddSeasons_WhileTheLastSeasonDownloads_QueuesThemWithoutInterrupting()
+    {
+        // Requested only season 3, which is downloading; seasons 1 and 2 are added afterwards
+        var downloading = new DownloadUnit { Id = "s3", SeasonNumber = 3, EpisodeNumbers = [1, 2], EpisodeIds = [31, 32], IsFullSeasonPack = true, Status = RequestStatus.Downloading };
+        var req = Series(downloading);
+        req.Status = RequestStatus.Downloading;
+        req.Scope = new RequestScope { SeasonNumbers = [3] };
+        var sonarr = SonarrWith(Ep(11, 1, 1), Ep(12, 1, 2), Ep(21, 2, 1), Ep(22, 2, 2, hasFile: true), Ep(31, 3, 1), Ep(32, 3, 2));
+
+        var result = await Tracker(RepoFor(req), sonarr).AddToRequestAsync(req.Id, false, [1, 2], [], _ => true);
+
+        Assert.Equal(AddScopeOutcome.Added, result.Outcome);
+        Assert.Equal(RequestStatus.Downloading, req.Status);
+        Assert.Equal([1, 2, 3], req.Scope.SeasonNumbers);
+        Assert.Equal(3, req.Units.Count);
+        Assert.Same(downloading, req.GetActiveUnit());
+        var season1 = req.Units.Single(u => u.SeasonNumber == 1);
+        Assert.True(season1.IsFullSeasonPack);
+        Assert.Equal([11, 12], season1.EpisodeIds);
+        // Season 2 already has E02: only the missing episode, one by one, never a pack of the whole season
+        var season2 = req.Units.Single(u => u.SeasonNumber == 2);
+        Assert.False(season2.IsFullSeasonPack);
+        Assert.Equal([21], season2.EpisodeIds);
+        Assert.Contains("Temporada 1", req.History.Last().Message);
+    }
+
+    [Fact]
+    public async Task AddSeasons_GoAfterWhatWasAlreadyQueued()
+    {
+        var req = Series(
+            new DownloadUnit { Id = "s3e1", SeasonNumber = 3, EpisodeNumbers = [1], EpisodeIds = [31], Status = RequestStatus.Downloading },
+            new DownloadUnit { Id = "s3e2", SeasonNumber = 3, EpisodeNumbers = [2], EpisodeIds = [32], Status = RequestStatus.Pending });
+        req.Status = RequestStatus.Downloading;
+        req.Scope = new RequestScope { SeasonNumbers = [3] };
+        var sonarr = SonarrWith(Ep(11, 1, 1), Ep(31, 3, 1), Ep(32, 3, 2));
+
+        await Tracker(RepoFor(req), sonarr).AddToRequestAsync(req.Id, false, [1], [], _ => true);
+
+        // The season asked for first keeps its turn; the added one follows
+        Assert.Equal(["s3e1", "s3e2"], req.Units.Take(2).Select(u => u.Id));
+        Assert.Equal(11, req.Units[2].EpisodeIds.Single());
+    }
+
+    [Fact]
+    public async Task AddSeasons_WhenNothingIsInProgress_StartsSearchingThem_AndEarlierSeasonsGoFirst()
+    {
+        // Season 2 finished except one episode set aside and one not aired yet
+        var parked = new DownloadUnit { Id = "s2e1", SeasonNumber = 2, EpisodeNumbers = [1], EpisodeIds = [21], Status = RequestStatus.RequiresAttention };
+        var future = new DownloadUnit { Id = "s2e3", SeasonNumber = 2, EpisodeNumbers = [3], EpisodeIds = [23], AirDateUtc = DateTime.UtcNow.AddDays(5), Status = RequestStatus.Pending };
+        var req = Series(new DownloadUnit { Id = "s2e2", SeasonNumber = 2, EpisodeNumbers = [2], EpisodeIds = [22], Status = RequestStatus.Available }, parked, future);
+        req.Status = RequestStatus.RequiresAttention;
+        req.Scope = new RequestScope { SeasonNumbers = [2] };
+        req.ImportingStartedAt = DateTimeOffset.UtcNow.AddMinutes(-3);
+        var sonarr = SonarrWith(Ep(11, 1, 1), Ep(21, 2, 1), Ep(22, 2, 2, hasFile: true), Ep(23, 2, 3, airedDaysAgo: -5));
+
+        var result = await Tracker(RepoFor(req), sonarr).AddToRequestAsync(req.Id, false, [1], [], _ => true);
+
+        Assert.Equal(AddScopeOutcome.Added, result.Outcome);
+        Assert.Equal(RequestStatus.Searching, req.Status);
+        Assert.Null(req.ImportingStartedAt);
+        // The new season 1 is not held behind S02E03, which has not aired yet
+        Assert.Equal(11, req.GetActiveUnit()!.EpisodeIds.Single());
+        Assert.Equal(RequestStatus.RequiresAttention, parked.Status);
+    }
+
+    [Fact]
+    public async Task AddWholeSeries_FollowsAiringAndAddsEverythingAiredThatIsMissing()
+    {
+        var req = Series(new DownloadUnit { Id = "s2", SeasonNumber = 2, EpisodeNumbers = [1], EpisodeIds = [21], Status = RequestStatus.Available });
+        req.Status = RequestStatus.Importing;
+        req.Scope = new RequestScope { SeasonNumbers = [2] };
+        var sonarr = SonarrWith(Ep(11, 1, 1), Ep(21, 2, 1, hasFile: true), Ep(22, 2, 2, airedDaysAgo: -3));
+
+        var result = await Tracker(RepoFor(req), sonarr).AddToRequestAsync(req.Id, true, [], [], _ => true);
+
+        Assert.Equal(AddScopeOutcome.Added, result.Outcome);
+        Assert.True(req.Scope.All);
+        Assert.True(req.FollowAiring);
+        // Aired and missing now; S02E02 airs later and comes with following
+        Assert.Equal([11], req.Units.Where(u => u.Status == RequestStatus.Pending).SelectMany(u => u.EpisodeIds));
+        Assert.Equal(RequestStatus.Searching, req.Status);
+    }
+
+    [Fact]
+    public async Task AddSeasons_AlreadyRequestedOrWholeSeries_IsReportedAsCovered()
+    {
+        var req = Series(new DownloadUnit { Id = "s1", SeasonNumber = 1, EpisodeNumbers = [1], EpisodeIds = [11], Status = RequestStatus.Downloading });
+        req.Status = RequestStatus.Downloading;
+        req.Scope = new RequestScope { SeasonNumbers = [1] };
+        var sonarr = SonarrWith(Ep(11, 1, 1));
+
+        Assert.Equal(AddScopeOutcome.AlreadyCovered, (await Tracker(RepoFor(req), sonarr).AddToRequestAsync(req.Id, false, [1], [], _ => true)).Outcome);
+        Assert.Single(req.Units);
+
+        req.Scope.All = true;
+        req.FollowAiring = true;
+        Assert.Equal(AddScopeOutcome.AlreadyCovered, (await Tracker(RepoFor(req), sonarr).AddToRequestAsync(req.Id, false, [2], [], _ => true)).Outcome);
+    }
+
+    [Fact]
+    public async Task AddSeasons_ToAFinishedRequest_IsRejected()
+    {
+        var req = Series(new DownloadUnit { Id = "s1", SeasonNumber = 1, EpisodeNumbers = [1], EpisodeIds = [11], Status = RequestStatus.Available });
+        req.Status = RequestStatus.Available;
+
+        var result = await Tracker(RepoFor(req), SonarrWith(Ep(21, 2, 1))).AddToRequestAsync(req.Id, false, [2], [], _ => true);
+
+        Assert.Equal(AddScopeOutcome.Invalid, result.Outcome);
+    }
+
     [Fact]
     public async Task RequestDto_SummarisesTheDownloads()
     {

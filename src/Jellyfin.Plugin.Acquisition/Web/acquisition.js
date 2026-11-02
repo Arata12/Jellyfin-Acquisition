@@ -484,6 +484,7 @@
                             </div>
                             <div class="scope-actions">
                                 <button id="btn-confirm-scope" class="acquisition-btn-primary">Confirmar y solicitar</button>
+                                <button id="btn-back-status" class="acquisition-btn-secondary" style="display: none;">Volver</button>
                             </div>
                         </div>
 
@@ -498,6 +499,7 @@
                                 <button id="btn-view-local" class="acquisition-btn-primary" style="display: none;">Ver en biblioteca</button>
                                 <button id="btn-view-releases" class="acquisition-btn-secondary" style="display: none;">Seleccionar release</button>
                                 <button id="btn-retry" class="acquisition-btn-secondary" style="display: none;">Reintentar</button>
+                                <button id="btn-add-episodes" class="acquisition-btn-secondary" style="display: none;">Añadir temporadas o episodios</button>
                                 <button id="btn-cancel-request" class="acquisition-btn-secondary" style="display: none;">Cancelar solicitud</button>
                             </div>
                             <div id="releases-container" class="releases-selection-list" style="display: none; margin-top: 15px;"></div>
@@ -643,7 +645,11 @@
                     episodesContainer.style.display = 'block';
                     if (!createdRequest) {
                         const created = await createAcquisitionRequest(item, { all: false }, getDestInfo().id);
-                        if (created.id) {
+                        if (created.id && created.existing) {
+                            // The series already has a request in progress: the choice is added to it
+                            createdRequest = created;
+                            loadEpisodesChecklist(modal, created.id);
+                        } else if (created.id) {
                             createdRequest = created;
                             markUnconfirmed(created.id);
                             await loadEpisodes();
@@ -669,6 +675,8 @@
 
             const scopeType = modal.querySelector('input[name="scopeType"]:checked').value;
             if (scopeType === 'all') {
+                // Created right here with the whole series already in its scope: nothing left to confirm
+                let createdWithAll = false;
                 if (!createdRequest) {
                     const created = await createAcquisitionRequest(item, { all: true }, getDestInfo().id);
                     if (!created.id) {
@@ -676,7 +684,16 @@
                         return;
                     }
                     createdRequest = created;
-                } else if (!await confirmScope(createdRequest.id, { all: true, seasonNumbers: [], episodeNumbers: [], episodeIds: [] })) {
+                    createdWithAll = !created.existing;
+                }
+
+                if (createdRequest.existing) {
+                    const added = await addToRequest(createdRequest.id, { all: true, seasonNumbers: [], episodeIds: [] });
+                    if (!added.ok) {
+                        fail(added.error);
+                        return;
+                    }
+                } else if (!createdWithAll && !await confirmScope(createdRequest.id, { all: true, seasonNumbers: [], episodeNumbers: [], episodeIds: [] })) {
                     fail('No se pudo confirmar la serie completa.');
                     return;
                 }
@@ -687,6 +704,20 @@
                 const checkedSeasons = Array.from(modal.querySelectorAll('.chk-season:checked')).map(cb => parseInt(cb.value, 10));
                 if (!createdRequest || (checked.length === 0 && checkedSeasons.length === 0)) {
                     fail('Selecciona al menos un episodio o una temporada.');
+                    return;
+                }
+
+                if (createdRequest.existing) {
+                    const added = await addToRequest(createdRequest.id, {
+                        all: false,
+                        seasonNumbers: checkedSeasons,
+                        episodeIds: checked.map(cb => parseInt(cb.dataset.id, 10)).filter(Boolean)
+                    });
+                    if (added.ok) {
+                        showStatusView(modal, createdRequest.id);
+                    } else {
+                        fail(added.error);
+                    }
                     return;
                 }
 
@@ -745,7 +776,8 @@
                 seasonNumber: e.seasonNumber ?? e.SeasonNumber,
                 episodeNumber: e.episodeNumber ?? e.EpisodeNumber,
                 title: e.title ?? e.Title ?? '',
-                hasFile: Boolean(e.hasFile ?? e.HasFile)
+                hasFile: Boolean(e.hasFile ?? e.HasFile),
+                requested: Boolean(e.isSelected ?? e.IsSelected)
             }));
             if (episodes.length === 0) {
                 if (attempt < EPISODE_LOAD_ATTEMPTS && document.body.contains(modal)) {
@@ -774,10 +806,11 @@
                         <div class="episodes-sublist">
                 `;
                 seasons[sNum].forEach(ep => {
+                    const note = ep.hasFile ? '(Ya en biblioteca)' : ep.requested ? '(Ya solicitado)' : '';
                     html += `
                         <label class="episode-item ${ep.hasFile ? 'has-file' : ''}">
-                            <input type="checkbox" class="chk-episode" value="${ep.episodeNumber}" data-id="${ep.id}" data-season="${sNum}" ${ep.hasFile ? 'disabled checked' : ''} />
-                            <span>Ep. ${ep.episodeNumber}: ${escapeHtml(ep.title)} ${ep.hasFile ? '(Ya en biblioteca)' : ''}</span>
+                            <input type="checkbox" class="chk-episode" value="${ep.episodeNumber}" data-id="${ep.id}" data-season="${sNum}" ${ep.hasFile || ep.requested ? 'disabled checked' : ''} />
+                            <span>Ep. ${ep.episodeNumber}: ${escapeHtml(ep.title)} ${note}</span>
                         </label>
                     `;
                 });
@@ -820,7 +853,7 @@
 
             if (resp.status === 409) {
                 const data = await resp.json();
-                return { id: data.requestId || data.RequestId };
+                return { id: data.requestId || data.RequestId, existing: true };
             }
 
             if (!resp.ok) {
@@ -835,6 +868,21 @@
         } catch (err) {
             console.error('[Acquisition] CreateRequest error:', err);
             return { id: null, error: 'Error de conexión al crear la solicitud.' };
+        }
+    }
+
+    // Adds seasons or episodes to a series request already in progress; returns { ok, error }
+    async function addToRequest(requestId, scopeData) {
+        try {
+            const resp = await fetch(`${getApiBase()}/Acquisition/requests/${encodeURIComponent(requestId)}/add`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify(scopeData)
+            });
+            return resp.ok ? { ok: true } : { ok: false, error: await readErrorMessage(resp, 'No se pudo añadir a la solicitud.') };
+        } catch (err) {
+            console.error('[Acquisition] AddToRequest error:', err);
+            return { ok: false, error: 'Error de conexión al añadir a la solicitud.' };
         }
     }
 
@@ -867,8 +915,68 @@
         const btnViewReleases = modal.querySelector('#btn-view-releases');
         const btnCancel = modal.querySelector('#btn-cancel-request');
         const releasesContainer = modal.querySelector('#releases-container');
+        const btnAddEpisodes = modal.querySelector('#btn-add-episodes');
         const requestUrl = `${getApiBase()}/Acquisition/requests/${encodeURIComponent(requestId)}`;
         let stopped = false;
+
+        btnAddEpisodes.addEventListener('click', () => {
+            // A fresh copy of the picker: listeners left by the creation flow must not run here
+            const oldArea = modal.querySelector('#acquisition-scope-area');
+            const scopeArea = oldArea.cloneNode(true);
+            oldArea.replaceWith(scopeArea);
+            scopeArea.querySelector('h3').textContent = 'Añadir a la solicitud';
+            const container = scopeArea.querySelector('#episodes-container');
+            const btnConfirm = scopeArea.querySelector('#btn-confirm-scope');
+            const btnBack = scopeArea.querySelector('#btn-back-status');
+            btnConfirm.disabled = false;
+            btnConfirm.textContent = 'Añadir a la solicitud';
+            btnBack.style.display = 'inline-block';
+            scopeArea.querySelector('input[name="scopeType"][value="custom"]').checked = true;
+            container.style.display = 'block';
+            scopeArea.querySelectorAll('input[name="scopeType"]').forEach(r => r.addEventListener('change', (e) => {
+                container.style.display = e.target.value === 'custom' ? 'block' : 'none';
+            }));
+
+            const backToStatus = () => {
+                scopeArea.style.display = 'none';
+                statusArea.style.display = 'block';
+            };
+            btnBack.addEventListener('click', backToStatus);
+            btnConfirm.addEventListener('click', async () => {
+                const all = scopeArea.querySelector('input[name="scopeType"]:checked').value === 'all';
+                const checked = Array.from(container.querySelectorAll('.chk-episode:checked:not(:disabled)'));
+                const checkedSeasons = Array.from(container.querySelectorAll('.chk-season:checked')).map(cb => parseInt(cb.value, 10));
+                const notice = modal.querySelector('#acquisition-request-error');
+                if (!all && checked.length === 0 && checkedSeasons.length === 0) {
+                    notice.textContent = 'Selecciona al menos un episodio o una temporada.';
+                    notice.style.display = 'block';
+                    return;
+                }
+
+                btnConfirm.disabled = true;
+                btnConfirm.textContent = 'Añadiendo...';
+                const added = await addToRequest(requestId, {
+                    all: all,
+                    seasonNumbers: all ? [] : checkedSeasons,
+                    episodeIds: all ? [] : checked.map(cb => parseInt(cb.dataset.id, 10)).filter(Boolean)
+                });
+                btnConfirm.disabled = false;
+                btnConfirm.textContent = 'Añadir a la solicitud';
+                if (added.ok) {
+                    notice.style.display = 'none';
+                    backToStatus();
+                    poll();
+                } else {
+                    notice.textContent = added.error;
+                    notice.style.display = 'block';
+                }
+            });
+
+            statusArea.style.display = 'none';
+            scopeArea.style.display = 'block';
+            container.innerHTML = '<em>Cargando episodios...</em>';
+            loadEpisodesChecklist(modal, requestId);
+        });
 
         btnRetry.addEventListener('click', async () => {
             btnRetry.disabled = true;
@@ -993,7 +1101,10 @@
                 }
                 if (resp.ok) {
                     const reqRaw = await resp.json();
+                    const scope = reqRaw.scope || reqRaw.Scope || {};
                     const req = {
+                        kind: kindName(reqRaw.kind ?? reqRaw.Kind),
+                        wholeSeries: Boolean(scope.all ?? scope.All),
                         status: statusName(reqRaw.status !== undefined ? reqRaw.status : reqRaw.Status),
                         attentionReason: reqRaw.attentionReason ?? reqRaw.AttentionReason,
                         errorMessage: reqRaw.errorMessage ?? reqRaw.ErrorMessage,
@@ -1033,6 +1144,10 @@
                     } else {
                         btnRetry.style.display = 'none';
                     }
+
+                    // One request per series: more seasons or episodes are added to the one in progress
+                    const active = req.status !== 'Failed' && (req.status !== 'Available' || progress.following);
+                    btnAddEpisodes.style.display = req.kind === 'Series' && active && !(req.wholeSeries && progress.following) ? 'inline-block' : 'none';
 
                     btnCancel.style.display = req.status === 'Available' && !progress.following ? 'none' : 'inline-block';
                     btnCancel.textContent = req.status === 'Available' && progress.following ? 'Dejar de seguir' : 'Cancelar solicitud';
