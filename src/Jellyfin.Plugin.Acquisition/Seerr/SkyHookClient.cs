@@ -20,6 +20,15 @@ public class SkyHookShow
     [JsonPropertyName("images")] public List<SkyHookImage> Images { get; set; } = [];
     [JsonPropertyName("actors")] public List<SkyHookActor> Actors { get; set; } = [];
     [JsonPropertyName("episodes")] public List<SkyHookEpisode> Episodes { get; set; } = [];
+    [JsonPropertyName("alternativeTitles")] public List<SkyHookTitle> AlternativeTitles { get; set; } = [];
+
+    /// <summary>MyAnimeList ids of the show (anime only), one per season or part.</summary>
+    [JsonPropertyName("malIds")] public List<int> MalIds { get; set; } = [];
+}
+
+public class SkyHookTitle
+{
+    [JsonPropertyName("title")] public string? Title { get; set; }
 }
 
 public class SkyHookRating

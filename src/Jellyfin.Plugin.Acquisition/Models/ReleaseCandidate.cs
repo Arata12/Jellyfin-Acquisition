@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Jellyfin.Plugin.Acquisition.Models;
 
 /// <summary>
@@ -31,5 +33,14 @@ public class ReleaseCandidate
     public int Score { get; set; }
     public bool IsEligible { get; set; } = true;
     public bool IdentityVerified { get; set; }
+
+    /// <summary>The release was identified as a different title (by ID or by Arr); no title match can override it.</summary>
+    [JsonIgnore]
+    public bool IdentityRejected { get; set; }
+
+    /// <summary>Returned by the indexer for a search by the requested IDs.</summary>
+    [JsonIgnore]
+    public bool FromIdSearch { get; set; }
+
     public List<string> RejectionReasons { get; set; } = [];
 }

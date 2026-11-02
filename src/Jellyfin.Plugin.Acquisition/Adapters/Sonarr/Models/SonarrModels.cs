@@ -87,8 +87,19 @@ public class SonarrSeries
     [JsonPropertyName("seriesType")]
     public string? SeriesType { get; set; } = "standard";
 
+    /// <summary>Scene names Sonarr knows for the series (the names releases are published with).</summary>
+    [JsonPropertyName("alternateTitles")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<SonarrAlternateTitle>? AlternateTitles { get; set; }
+
     [JsonPropertyName("addOptions")]
     public SonarrAddOptions? AddOptions { get; set; }
+}
+
+public class SonarrAlternateTitle
+{
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
 }
 
 public class SonarrEpisode

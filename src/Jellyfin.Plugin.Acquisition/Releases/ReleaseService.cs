@@ -24,21 +24,27 @@ public class ReleaseService : IReleaseService
     /// <summary>Concurrent Arr /parse calls per search, to keep the search fast without flooding Arr.</summary>
     private const int ParseConcurrency = 4;
 
+    /// <summary>Extra title searches with other names of the title when nothing eligible was found.</summary>
+    private const int MaxAliasSearches = 2;
+
     private readonly IProwlarrClient _prowlarrClient;
     private readonly ISonarrClient _sonarrClient;
     private readonly IRadarrClient _radarrClient;
     private readonly ILogger<ReleaseService> _logger;
+    private readonly ITitleAliasService? _aliasService;
 
     public ReleaseService(
         IProwlarrClient prowlarrClient,
         ISonarrClient sonarrClient,
         IRadarrClient radarrClient,
-        ILogger<ReleaseService> logger)
+        ILogger<ReleaseService> logger,
+        ITitleAliasService? aliasService = null)
     {
         _prowlarrClient = prowlarrClient;
         _sonarrClient = sonarrClient;
         _radarrClient = radarrClient;
         _logger = logger;
+        _aliasService = aliasService;
     }
 
     public Task<List<ReleaseCandidate>> SearchAndEvaluateReleasesAsync(AcquisitionRequest request, CancellationToken ct = default)
@@ -89,15 +95,149 @@ public class ReleaseService : IReleaseService
             }
         }
 
-        var prowlarrReleases = await _prowlarrClient.SearchAsync(pQuery, ct).ConfigureAwait(false);
-        var candidates = new List<ReleaseCandidate>();
-        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // The ID is what identifies the title (user decision): the search by ID runs next to the title search and
+        // finds releases named in another language; the other names of the title are read by ID as well
+        var aliasTask = GetAliasesAsync(request, ct);
+        var byIdTask = SearchByIdAsync(pQuery, ct);
+        var byTitle = await _prowlarrClient.SearchAsync(pQuery, ct).ConfigureAwait(false);
+        var byId = await byIdTask.ConfigureAwait(false);
+        var aliases = await aliasTask.ConfigureAwait(false);
 
-        foreach (var pr in prowlarrReleases)
+        var seen = new Dictionary<string, ReleaseCandidate>(StringComparer.OrdinalIgnoreCase);
+        var candidates = AddCandidates(byId, fromIdSearch: true, request, seen);
+        candidates.AddRange(AddCandidates(byTitle, fromIdSearch: false, request, seen));
+        await EvaluateAllAsync(candidates, request, unit, aliases, config, ct).ConfigureAwait(false);
+
+        // Nothing usable under the requested name: search again with the other names of the title (romaji, scene names)
+        if (!candidates.Any(c => c.IsEligible))
+        {
+            foreach (var alias in SearchableAliases(request.Title, aliases).Take(MaxAliasSearches))
+            {
+                var aliasQuery = CloneQuery(pQuery, alias);
+                List<ProwlarrRelease> byAlias;
+                try
+                {
+                    byAlias = await _prowlarrClient.SearchAsync(aliasQuery, ct).ConfigureAwait(false);
+                }
+                catch (ProwlarrUnavailableException ex)
+                {
+                    _logger.LogDebug(ex, "Search by alternative title {Alias} failed", alias);
+                    continue;
+                }
+
+                var added = AddCandidates(byAlias, fromIdSearch: false, request, seen);
+                await EvaluateAllAsync(added, request, unit, aliases, config, ct).ConfigureAwait(false);
+                candidates.AddRange(added);
+            }
+        }
+
+        // Deterministic ordering (user decision): eligible first, then the release that best matches the quality
+        // preferences (resolution > source > codec, in the score), then most seeders among equal quality, then title.
+        // A release of another title never sits above one of the requested title, whatever its seeders.
+        return candidates
+            .OrderByDescending(c => c.IsEligible)
+            .ThenByDescending(c => c.IdentityVerified && !c.IdentityRejected)
+            .ThenByDescending(c => c.Score)
+            .ThenByDescending(c => c.Seeders)
+            .ThenBy(c => c.Title, StringComparer.Ordinal)
+            .Take(MaxCandidates)
+            .ToList();
+    }
+
+    private async Task<IReadOnlyList<string>> GetAliasesAsync(AcquisitionRequest request, CancellationToken ct)
+    {
+        if (_aliasService == null) return [];
+
+        try
+        {
+            return await _aliasService.GetAliasesAsync(request, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogDebug(ex, "Could not read the alternative titles of {Title}", request.Title);
+            return [];
+        }
+    }
+
+    /// <summary>Search by the requested IDs; a failure here never hides the results of the title search.</summary>
+    private async Task<List<ProwlarrRelease>> SearchByIdAsync(ProwlarrSearchQuery query, CancellationToken ct)
+    {
+        var idQuery = CloneQuery(query, query.Query);
+        idQuery.ById = true;
+        if (ProwlarrClient.BuildIdQuery(idQuery).Length == 0) return [];
+
+        try
+        {
+            return await _prowlarrClient.SearchAsync(idQuery, ct).ConfigureAwait(false) ?? [];
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogDebug(ex, "Search by ID failed for {Title}", query.Query);
+            return [];
+        }
+    }
+
+    private static ProwlarrSearchQuery CloneQuery(ProwlarrSearchQuery query, string title) => new()
+    {
+        Query = title,
+        Kind = query.Kind,
+        Season = query.Season,
+        Episode = query.Episode,
+        AbsoluteEpisode = query.AbsoluteEpisode,
+        IsAnime = query.IsAnime,
+        TvdbId = query.TvdbId,
+        TmdbId = query.TmdbId,
+        ImdbId = query.ImdbId,
+        IndexerIds = query.IndexerIds
+    };
+
+    /// <summary>Other names worth a title search: Latin script (what indexers are searched with) and not the same name.</summary>
+    private static IEnumerable<string> SearchableAliases(string title, IReadOnlyList<string> aliases)
+    {
+        var used = new HashSet<string> { NormalizeTitle(title) };
+        foreach (var alias in aliases)
+        {
+            var norm = NormalizeTitle(alias);
+            if (norm.Length < 3 || !norm.Any(char.IsLetter) || norm.Any(c => char.IsLetter(c) && c > '\u024F')) continue;
+            if (used.Add(norm)) yield return alias;
+        }
+    }
+
+    private async Task EvaluateAllAsync(List<ReleaseCandidate> candidates, AcquisitionRequest request, DownloadUnit? unit, IReadOnlyList<string> aliases, Configuration.PluginConfiguration? config, CancellationToken ct)
+    {
+        // Enrich with Arr /parse with bounded concurrency (sequential calls made large result lists very slow)
+        using (var throttle = new SemaphoreSlim(ParseConcurrency))
+        {
+            await Task.WhenAll(candidates.Select(async candidate =>
+            {
+                await throttle.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    await TryEnrichFromArrParseAsync(candidate, request, ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    throttle.Release();
+                }
+            })).ConfigureAwait(false);
+        }
+
+        foreach (var candidate in candidates)
+        {
+            EvaluateCandidate(candidate, request, unit, aliases, config);
+        }
+    }
+
+    /// <summary>New candidates for the releases not seen yet; a release seen again in the search by ID is marked as such.</summary>
+    private static List<ReleaseCandidate> AddCandidates(IEnumerable<ProwlarrRelease> releases, bool fromIdSearch, AcquisitionRequest request, Dictionary<string, ReleaseCandidate> seen)
+    {
+        var candidates = new List<ReleaseCandidate>();
+        foreach (var pr in releases)
         {
             var key = !string.IsNullOrEmpty(pr.InfoHash) ? pr.InfoHash : $"{pr.IndexerId}:{pr.Guid ?? pr.Title}";
-            if (!seenKeys.Add(key))
+            if (seen.TryGetValue(key, out var existing))
             {
+                existing.FromIdSearch |= fromIdSearch;
                 continue;
             }
 
@@ -131,40 +271,56 @@ public class ReleaseService : IReleaseService
             candidate.Resolution = ReleaseParser.NormalizeResolution(candidate.Title);
             candidate.Source = ReleaseParser.NormalizeSource(candidate.Title);
 
+            // IDs the indexer tagged the release with decide first, over Arr, the name and the seeders
+            var (idsMatch, idReason) = CompareReleaseIds(pr, request);
+            if (idsMatch == true)
+            {
+                candidate.IdentityVerified = true;
+            }
+            else if (idsMatch == false)
+            {
+                candidate.IdentityRejected = true;
+                candidate.RejectionReasons.Add(idReason!);
+            }
+
+            candidate.FromIdSearch = fromIdSearch;
+            seen[key] = candidate;
             candidates.Add(candidate);
         }
 
-        // Enrich with Arr /parse with bounded concurrency (sequential calls made large result lists very slow)
-        using (var throttle = new SemaphoreSlim(ParseConcurrency))
+        return candidates;
+    }
+
+    /// <summary>
+    /// True when the release carries one of the requested IDs and none that differs, false when any ID it carries
+    /// differs (conservative: an indexer tagging a release with another title's ID is never trusted), null without IDs.
+    /// </summary>
+    private static (bool? Match, string? Reason) CompareReleaseIds(ProwlarrRelease release, AcquisitionRequest request)
+    {
+        var ids = request.ProviderIds ?? new ProviderIds();
+        var comparisons = new List<(string Name, int Found, int Expected)>();
+        if (request.Kind == MediaKind.Series && release.TvdbId > 0 && int.TryParse(ids.Tvdb, out var tvdb) && tvdb > 0)
         {
-            await Task.WhenAll(candidates.Select(async candidate =>
-            {
-                await throttle.WaitAsync(ct).ConfigureAwait(false);
-                try
-                {
-                    await TryEnrichFromArrParseAsync(candidate, request, ct).ConfigureAwait(false);
-                }
-                finally
-                {
-                    throttle.Release();
-                }
-            })).ConfigureAwait(false);
+            comparisons.Add(("TVDB", release.TvdbId, tvdb));
         }
 
-        foreach (var candidate in candidates)
+        if (release.TmdbId > 0 && int.TryParse(ids.Tmdb, out var tmdb) && tmdb > 0)
         {
-            EvaluateCandidate(candidate, request, unit, config);
+            comparisons.Add(("TMDB", release.TmdbId, tmdb));
         }
 
-        // Deterministic ordering (user decision): eligible first, then the release that best matches the quality
-        // preferences (resolution > source > codec, in the score), then most seeders among equal quality, then title
-        return candidates
-            .OrderByDescending(c => c.IsEligible)
-            .ThenByDescending(c => c.Score)
-            .ThenByDescending(c => c.Seeders)
-            .ThenBy(c => c.Title, StringComparer.Ordinal)
-            .Take(MaxCandidates)
-            .ToList();
+        if (release.ImdbId > 0 && ids.Imdb != null && ids.Imdb.StartsWith("tt", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(ids.Imdb.AsSpan(2), out var imdb) && imdb > 0)
+        {
+            comparisons.Add(("IMDb", release.ImdbId, imdb));
+        }
+
+        if (comparisons.Count == 0) return (null, null);
+
+        var wrong = comparisons.FirstOrDefault(c => c.Found != c.Expected);
+        return wrong.Name == null
+            ? (true, null)
+            : (false, $"Identity mismatch: release is tagged {wrong.Name} {wrong.Found}, expected {wrong.Expected}");
     }
 
     private async Task TryEnrichFromArrParseAsync(ReleaseCandidate candidate, AcquisitionRequest request, CancellationToken ct)
@@ -176,43 +332,29 @@ public class ReleaseService : IReleaseService
                 var parseResult = await _sonarrClient.ParseAsync(candidate.Title, ct).ConfigureAwait(false);
                 if (parseResult != null)
                 {
-                    // Check identity via parsed series (R05/N05)
+                    // Check identity via parsed series (R05/N05), unless the release's own IDs already decided it
+                    bool? seriesMatches = null;
+                    string? mismatch = null;
                     if (parseResult.Series != null)
                     {
                         if (request.ArrId.HasValue && parseResult.Series.Id > 0)
                         {
-                            if (parseResult.Series.Id == request.ArrId.Value)
-                            {
-                                candidate.IdentityVerified = true;
-                            }
-                            else
-                            {
-                                candidate.RejectionReasons.Add($"Identity mismatch (Sonarr parsed series ID {parseResult.Series.Id} != expected {request.ArrId.Value})");
-                            }
+                            seriesMatches = parseResult.Series.Id == request.ArrId.Value;
+                            mismatch = $"Identity mismatch (Sonarr parsed series ID {parseResult.Series.Id} != expected {request.ArrId.Value})";
                         }
                         else if (!string.IsNullOrEmpty(request.ProviderIds.Tvdb) && parseResult.Series.TvdbId > 0)
                         {
-                            if (parseResult.Series.TvdbId.ToString() == request.ProviderIds.Tvdb)
-                            {
-                                candidate.IdentityVerified = true;
-                            }
-                            else
-                            {
-                                candidate.RejectionReasons.Add($"Identity mismatch (Sonarr parsed TVDB {parseResult.Series.TvdbId} != expected {request.ProviderIds.Tvdb})");
-                            }
+                            seriesMatches = parseResult.Series.TvdbId.ToString() == request.ProviderIds.Tvdb;
+                            mismatch = $"Identity mismatch (Sonarr parsed TVDB {parseResult.Series.TvdbId} != expected {request.ProviderIds.Tvdb})";
                         }
                         else if (!string.IsNullOrEmpty(parseResult.Series.Title))
                         {
-                            if (string.Equals(parseResult.Series.Title.Trim(), request.Title.Trim(), StringComparison.OrdinalIgnoreCase))
-                            {
-                                candidate.IdentityVerified = true;
-                            }
-                            else
-                            {
-                                candidate.RejectionReasons.Add($"Identity mismatch (Sonarr parsed title '{parseResult.Series.Title}' != expected '{request.Title}')");
-                            }
+                            seriesMatches = string.Equals(parseResult.Series.Title.Trim(), request.Title.Trim(), StringComparison.OrdinalIgnoreCase);
+                            mismatch = $"Identity mismatch (Sonarr parsed title '{parseResult.Series.Title}' != expected '{request.Title}')";
                         }
                     }
+
+                    ApplyArrIdentity(candidate, seriesMatches, mismatch);
 
                     if (parseResult.ParsedEpisodeInfo != null)
                     {
@@ -238,7 +380,7 @@ public class ReleaseService : IReleaseService
 
                     // When Sonarr matched the series, it maps absolute (anime) numbering to real season/episode
                     var mapped = parseResult.Episodes.FirstOrDefault();
-                    if (candidate.IdentityVerified && mapped != null && mapped.SeasonNumber > 0 && candidate.EpisodeNumber <= 0)
+                    if (seriesMatches == true && candidate.IdentityVerified && mapped != null && mapped.SeasonNumber > 0 && candidate.EpisodeNumber <= 0)
                     {
                         candidate.SeasonNumber = mapped.SeasonNumber;
                         candidate.EpisodeNumber = mapped.EpisodeNumber;
@@ -250,43 +392,29 @@ public class ReleaseService : IReleaseService
                 var parseResult = await _radarrClient.ParseAsync(candidate.Title, ct).ConfigureAwait(false);
                 if (parseResult != null)
                 {
-                    // Check identity via parsed movie (R05/N05)
+                    // Check identity via parsed movie (R05/N05), unless the release's own IDs already decided it
+                    bool? movieMatches = null;
+                    string? mismatch = null;
                     if (parseResult.Movie != null)
                     {
                         if (request.ArrId.HasValue && parseResult.Movie.Id > 0)
                         {
-                            if (parseResult.Movie.Id == request.ArrId.Value)
-                            {
-                                candidate.IdentityVerified = true;
-                            }
-                            else
-                            {
-                                candidate.RejectionReasons.Add($"Identity mismatch (Radarr parsed movie ID {parseResult.Movie.Id} != expected {request.ArrId.Value})");
-                            }
+                            movieMatches = parseResult.Movie.Id == request.ArrId.Value;
+                            mismatch = $"Identity mismatch (Radarr parsed movie ID {parseResult.Movie.Id} != expected {request.ArrId.Value})";
                         }
                         else if (!string.IsNullOrEmpty(request.ProviderIds.Tmdb) && parseResult.Movie.TmdbId > 0)
                         {
-                            if (parseResult.Movie.TmdbId.ToString() == request.ProviderIds.Tmdb)
-                            {
-                                candidate.IdentityVerified = true;
-                            }
-                            else
-                            {
-                                candidate.RejectionReasons.Add($"Identity mismatch (Radarr parsed TMDb {parseResult.Movie.TmdbId} != expected {request.ProviderIds.Tmdb})");
-                            }
+                            movieMatches = parseResult.Movie.TmdbId.ToString() == request.ProviderIds.Tmdb;
+                            mismatch = $"Identity mismatch (Radarr parsed TMDb {parseResult.Movie.TmdbId} != expected {request.ProviderIds.Tmdb})";
                         }
                         else if (!string.IsNullOrEmpty(parseResult.Movie.Title))
                         {
-                            if (string.Equals(parseResult.Movie.Title.Trim(), request.Title.Trim(), StringComparison.OrdinalIgnoreCase))
-                            {
-                                candidate.IdentityVerified = true;
-                            }
-                            else
-                            {
-                                candidate.RejectionReasons.Add($"Identity mismatch (Radarr parsed title '{parseResult.Movie.Title}' != expected '{request.Title}')");
-                            }
+                            movieMatches = string.Equals(parseResult.Movie.Title.Trim(), request.Title.Trim(), StringComparison.OrdinalIgnoreCase);
+                            mismatch = $"Identity mismatch (Radarr parsed title '{parseResult.Movie.Title}' != expected '{request.Title}')";
                         }
                     }
+
+                    ApplyArrIdentity(candidate, movieMatches, mismatch);
 
                     if (parseResult.ParsedMovieInfo != null)
                     {
@@ -315,7 +443,23 @@ public class ReleaseService : IReleaseService
         }
     }
 
-    private static void EvaluateCandidate(ReleaseCandidate candidate, AcquisitionRequest request, DownloadUnit? unit, Configuration.PluginConfiguration? config)
+    /// <summary>Arr's verdict, when it recognised the release and the release's own IDs did not already decide.</summary>
+    private static void ApplyArrIdentity(ReleaseCandidate candidate, bool? matches, string? mismatch)
+    {
+        if (matches == null || candidate.IdentityVerified || candidate.IdentityRejected) return;
+
+        if (matches.Value)
+        {
+            candidate.IdentityVerified = true;
+        }
+        else
+        {
+            candidate.IdentityRejected = true;
+            candidate.RejectionReasons.Add(mismatch!);
+        }
+    }
+
+    private static void EvaluateCandidate(ReleaseCandidate candidate, AcquisitionRequest request, DownloadUnit? unit, IReadOnlyList<string> aliases, Configuration.PluginConfiguration? config)
     {
         var reasons = new List<string>(candidate.RejectionReasons);
 
@@ -325,45 +469,56 @@ public class ReleaseService : IReleaseService
             reasons.Add("Protocol is not torrent");
         }
 
-        // 2. Mandatory: Identity verification & fallback (N05, H07 & J03)
-        if (!candidate.IdentityVerified)
+        // 2. Mandatory: Identity verification & fallback (N05, H07 & J03). A release identified as another title (by
+        // ID or by Arr) stays rejected; one the indexer returned for the requested IDs is that title, whatever its name
+        if (!candidate.IdentityVerified && !candidate.IdentityRejected && candidate.FromIdSearch)
+        {
+            candidate.IdentityVerified = true;
+        }
+
+        if (!candidate.IdentityVerified && !candidate.IdentityRejected)
         {
             // Clean trailing year in parentheses like "Doctor Who (2005)" without affecting numeric titles like "1923"
-            var cleanReq = TrailingParenthesesYear.Replace(request.Title, string.Empty).Trim();
-            var normReq = NormalizeTitle(cleanReq);
+            var normReq = NormalizeTitle(TrailingParenthesesYear.Replace(request.Title, string.Empty).Trim());
 
             // Anime releases start with "[Group]"; it is not part of the title
             var strippedTitle = LeadingGroupTag.Replace(candidate.Title, string.Empty);
             var prefix = ExtractTitlePrefix(strippedTitle);
             var normCand = NormalizeTitle(prefix);
 
-            var titlesMatch = normReq == normCand ||
-                StripLeadingArticle(normReq) == StripLeadingArticle(normCand);
-
+            var titlesMatch = false;
             int? candidateYear = null;
 
-            if (!titlesMatch)
+            // The requested title first, then its other names read by ID (another language, romaji, scene names)
+            foreach (var name in aliases.Prepend(request.Title))
             {
+                var norm = NormalizeTitle(TrailingParenthesesYear.Replace(name, string.Empty).Trim());
+                if (norm.Length == 0) continue;
+
+                if (norm == normCand || StripLeadingArticle(norm) == StripLeadingArticle(normCand))
+                {
+                    // Exact title match. Check if candidate title has a year token after the title prefix
+                    titlesMatch = true;
+                    var yearMatch = YearRegex.Match(strippedTitle[prefix.Length..]);
+                    if (yearMatch.Success)
+                    {
+                        candidateYear = int.Parse(yearMatch.Value);
+                    }
+
+                    break;
+                }
+
                 // Check if candidate prefix ends with a 4-digit disambiguation year: "<Title> <Year>"
                 var trailingYearMatch = TrailingYearPattern.Match(normCand);
                 if (trailingYearMatch.Success)
                 {
                     var titleWithoutYear = normCand[..trailingYearMatch.Index].Trim();
-                    if (titleWithoutYear == normReq || StripLeadingArticle(titleWithoutYear) == StripLeadingArticle(normReq))
+                    if (titleWithoutYear == norm || StripLeadingArticle(titleWithoutYear) == StripLeadingArticle(norm))
                     {
                         titlesMatch = true;
                         candidateYear = int.Parse(trailingYearMatch.Groups[1].Value);
+                        break;
                     }
-                }
-            }
-            else
-            {
-                // Exact title match. Check if candidate title has a year token after the title prefix
-                var afterPrefix = strippedTitle[prefix.Length..];
-                var yearMatch = YearRegex.Match(afterPrefix);
-                if (yearMatch.Success)
-                {
-                    candidateYear = int.Parse(yearMatch.Value);
                 }
             }
 
@@ -606,7 +761,9 @@ public class ReleaseService : IReleaseService
     private static string NormalizeTitle(string title)
     {
         if (string.IsNullOrWhiteSpace(title)) return string.Empty;
-        var cleaned = Regex.Replace(title, @"[._\-\(\)\[\]+:]", " ");
+        // Apostrophes vanish in release names ("Journeys"), other punctuation separates words ("Girlfriend, Girlfriend")
+        var cleaned = Regex.Replace(title, @"['’`]", string.Empty);
+        cleaned = Regex.Replace(cleaned, @"[._\-\(\)\[\]+:,!?;/~]", " ");
         cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim().ToLowerInvariant();
         return cleaned;
     }

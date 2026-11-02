@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Jellyfin.Plugin.Acquisition.Models;
 
 namespace Jellyfin.Plugin.Acquisition.Seerr;
 
@@ -13,6 +14,9 @@ public interface ITmdbClient
     /// <paramref name="mediaType"/> fills in the type on single-type endpoints. Null when TMDB cannot be read.
     /// </summary>
     Task<SeerrPageDto?> GetPageAsync(string path, int page, string? language, string? mediaType, IReadOnlyDictionary<string, string>? query = null, CancellationToken ct = default);
+
+    /// <summary>Every alternative title TMDB lists for the movie or series; empty without a key or when TMDB cannot be read.</summary>
+    Task<List<string>> GetAlternativeTitlesAsync(MediaKind kind, int tmdbId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -39,11 +43,6 @@ public class TmdbClient : ITmdbClient
 
     public async Task<SeerrPageDto?> GetPageAsync(string path, int page, string? language, string? mediaType, IReadOnlyDictionary<string, string>? query = null, CancellationToken ct = default)
     {
-        var key = ApiKey;
-        if (key.Length == 0) return null;
-
-        // v4 read access tokens are JWTs sent as bearer; v3 keys go in the query string
-        var isBearer = key.StartsWith("eyJ", StringComparison.Ordinal);
         var parameters = new Dictionary<string, string> { ["page"] = Math.Clamp(page, 1, 500).ToString(System.Globalization.CultureInfo.InvariantCulture) };
         if (!string.IsNullOrWhiteSpace(language)) parameters["language"] = language.Trim();
         if (query != null)
@@ -51,6 +50,36 @@ public class TmdbClient : ITmdbClient
             foreach (var (k, v) in query) parameters[k] = v;
         }
 
+        using var doc = await GetJsonAsync(path, parameters, ct).ConfigureAwait(false);
+        return doc == null ? null : MapPage(doc.RootElement, mediaType);
+    }
+
+    public async Task<List<string>> GetAlternativeTitlesAsync(MediaKind kind, int tmdbId, CancellationToken ct = default)
+    {
+        if (tmdbId <= 0) return [];
+
+        // Movies list them under "titles", series under "results"
+        var path = kind == MediaKind.Movie ? $"movie/{tmdbId}/alternative_titles" : $"tv/{tmdbId}/alternative_titles";
+        using var doc = await GetJsonAsync(path, new Dictionary<string, string>(), ct).ConfigureAwait(false);
+        if (doc == null) return [];
+
+        var listName = kind == MediaKind.Movie ? "titles" : "results";
+        if (!doc.RootElement.TryGetProperty(listName, out var list) || list.ValueKind != JsonValueKind.Array) return [];
+
+        return list.EnumerateArray()
+            .Select(t => t.TryGetProperty("title", out var title) && title.ValueKind == JsonValueKind.String ? title.GetString() : null)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t!)
+            .ToList();
+    }
+
+    private async Task<JsonDocument?> GetJsonAsync(string path, Dictionary<string, string> parameters, CancellationToken ct)
+    {
+        var key = ApiKey;
+        if (key.Length == 0) return null;
+
+        // v4 read access tokens are JWTs sent as bearer; v3 keys go in the query string
+        var isBearer = key.StartsWith("eyJ", StringComparison.Ordinal);
         if (!isBearer) parameters["api_key"] = key;
 
         var url = BaseUrl + path.TrimStart('/') + "?" + string.Join("&", parameters.Select(p => $"{Uri.EscapeDataString(p.Key)}={Uri.EscapeDataString(p.Value)}"));
@@ -67,8 +96,7 @@ public class TmdbClient : ITmdbClient
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
-            return MapPage(doc.RootElement, mediaType);
+            return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

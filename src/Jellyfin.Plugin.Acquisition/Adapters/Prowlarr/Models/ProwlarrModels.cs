@@ -58,6 +58,20 @@ public class ProwlarrRelease
 
     [JsonPropertyName("categories")]
     public List<ProwlarrCategory>? Categories { get; set; }
+
+    /// <summary>IDs the indexer tagged the release with; 0 when it publishes none.</summary>
+    [JsonPropertyName("tvdbId")]
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public int TvdbId { get; set; }
+
+    [JsonPropertyName("tmdbId")]
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public int TmdbId { get; set; }
+
+    /// <summary>IMDb number without the "tt" prefix, as Prowlarr returns it.</summary>
+    [JsonPropertyName("imdbId")]
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public int ImdbId { get; set; }
 }
 
 public class ProwlarrCategory
@@ -85,6 +99,10 @@ public class ProwlarrSearchQuery
     public string? TvdbId { get; set; }
     public string? TmdbId { get; set; }
     public string? ImdbId { get; set; }
+
+    /// <summary>Search by the IDs instead of the title; only indexers that support ID search answer it.</summary>
+    public bool ById { get; set; }
+
     public List<int>? IndexerIds { get; set; }
 }
 

@@ -61,6 +61,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // 4. Domain & Matching Services
         serviceCollection.AddSingleton<ILocalMatcherService, LocalMatcherService>();
         serviceCollection.AddSingleton<ICatalogService, CatalogService>();
+        serviceCollection.AddHttpClient<ITitleAliasService, TitleAliasService>()
+            .ConfigurePrimaryHttpMessageHandler(() => CreateLongLivedHandler())
+            .SetHandlerLifetime(Timeout.InfiniteTimeSpan);
         serviceCollection.AddSingleton<IReleaseService, ReleaseService>();
         serviceCollection.AddSingleton<ITrackerService, TrackerService>();
 

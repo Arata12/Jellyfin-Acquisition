@@ -74,7 +74,14 @@ public class ProwlarrClient : IProwlarrClient
             var categories = query.Kind == MediaKind.Movie ? "2000" : "5000";
 
             var queryString = query.Query;
-            if (query.Kind == MediaKind.Series && query.AbsoluteEpisode.HasValue)
+            var searchType = "search";
+            if (query.ById)
+            {
+                // Prowlarr's ID tokens: it only asks the indexers that support these IDs and sends them as parameters
+                queryString = BuildIdQuery(query);
+                searchType = query.Kind == MediaKind.Movie ? "movie" : "tvsearch";
+            }
+            else if (query.Kind == MediaKind.Series && query.AbsoluteEpisode.HasValue)
             {
                 queryString = $"{query.Query} {query.AbsoluteEpisode.Value:D2}";
             }
@@ -95,7 +102,7 @@ public class ProwlarrClient : IProwlarrClient
                 }
             }
 
-            var url = $"api/v1/search?query={Uri.EscapeDataString(queryString)}&categories={categories}&type=search";
+            var url = $"api/v1/search?query={Uri.EscapeDataString(queryString)}&categories={categories}&type={searchType}";
             if (query.IndexerIds != null && query.IndexerIds.Count > 0)
             {
                 foreach (var indexerId in query.IndexerIds)
@@ -133,6 +140,24 @@ public class ProwlarrClient : IProwlarrClient
             LogFailure(ex, "Prowlarr Search failed for query {Query}", query.Query);
             throw new ProwlarrUnavailableException("Prowlarr could not be reached: " + Security.SecurityHelper.RedactSecrets(ex.Message), ex);
         }
+    }
+
+    /// <summary>"{TvdbId:1}{TmdbId:2}{Season:1}{Episode:3}" (series) or "{ImdbId:tt1}{TmdbId:2}" (movies); empty without IDs.</summary>
+    public static string BuildIdQuery(ProwlarrSearchQuery query)
+    {
+        var tokens = new List<string>();
+        if (query.Kind == MediaKind.Series && int.TryParse(query.TvdbId, out var tvdb) && tvdb > 0) tokens.Add($"{{TvdbId:{tvdb}}}");
+        if (int.TryParse(query.TmdbId, out var tmdb) && tmdb > 0) tokens.Add($"{{TmdbId:{tmdb}}}");
+        if (!string.IsNullOrWhiteSpace(query.ImdbId) && Regex.IsMatch(query.ImdbId.Trim(), @"^tt\d+$")) tokens.Add($"{{ImdbId:{query.ImdbId.Trim()}}}");
+        if (tokens.Count == 0) return string.Empty;
+
+        if (query.Kind == MediaKind.Series && query.Season.HasValue)
+        {
+            tokens.Add($"{{Season:{query.Season.Value}}}");
+            if (query.Episode.HasValue) tokens.Add($"{{Episode:{query.Episode.Value}}}");
+        }
+
+        return string.Concat(tokens);
     }
 
     public async Task<TorrentDownloadResult> FetchTorrentAsync(string downloadUrl, CancellationToken ct = default)
