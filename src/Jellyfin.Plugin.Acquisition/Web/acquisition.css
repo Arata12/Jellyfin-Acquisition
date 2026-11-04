@@ -55,17 +55,15 @@
     --acq-meta-weight: 200;
 }
 
+/* Aligned with Jellyfin's own search sections (.padded-left/.padded-right are 3.3% of the page width) */
 .acquisition-section {
     position: relative;
     clear: both;
     display: block;
     width: 100%;
     box-sizing: border-box;
-    margin-top: 3em;
-    margin-bottom: 3em;
-    padding-top: 1.5em;
-    padding-bottom: 1.5em;
-    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    margin: 1.5em 0 3em;
+    padding: 1.2em 3.3% 1.5em;
     background: transparent;
     overflow: visible;
 }
@@ -84,21 +82,23 @@
 
 .acquisition-header {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 1em;
+    column-gap: 1em;
+    row-gap: 0.2em;
     margin-bottom: 1em;
 }
 
 .acquisition-header h2 {
     margin: 0;
-    font-size: 1.4em;
+    font-size: 1.5em;
     font-weight: 600;
-    color: #e0e0e0;
+    color: var(--acq-text);
 }
 
 .acquisition-subtitle {
     font-size: 0.9em;
-    color: #888;
+    color: var(--acq-text-secondary);
 }
 
 .acquisition-loading {
@@ -109,8 +109,15 @@
 
 .acquisition-cards-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
     gap: 1.2em;
+}
+
+@media (max-width: 600px) {
+    .acquisition-cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        gap: 0.9em;
+    }
 }
 
 .acquisition-card {
@@ -153,6 +160,29 @@
     height: 100%;
     object-fit: cover;
     display: block;
+}
+
+/* Shown instead of the poster when the title has none or it fails to load */
+.acquisition-poster-fallback {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px;
+    box-sizing: border-box;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.55);
+    background: linear-gradient(160deg, #262626, #161616);
+    font-size: 0.85em;
+    overflow-wrap: anywhere;
+}
+
+.acquisition-poster-fallback .material-icons {
+    font-size: 2.6em;
+    opacity: 0.6;
 }
 
 .acquisition-badge {
@@ -214,10 +244,7 @@
 /* Modal Overlay */
 .acquisition-modal-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    inset: 0;
     /* Like Jellyfin's own dialogs: a 50% black backdrop without blur (Abyss keeps its lighter frosted backdrop) */
     background: var(--acq-overlay);
     -webkit-backdrop-filter: blur(var(--acq-overlay-blur));
@@ -226,18 +253,22 @@
     align-items: center;
     justify-content: center;
     z-index: 99999;
-    padding: 20px;
+    padding: 24px;
+    box-sizing: border-box;
 }
 
+/* The frame never scrolls: the body does, so the close button stays reachable */
 .acquisition-modal-content {
     background: var(--acq-modal-bg);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: calc(var(--acq-radius) + 4px);
-    max-width: 680px;
-    width: 100%;
-    max-height: 85vh;
-    overflow-y: auto;
+    width: min(880px, 100%);
+    max-height: min(90vh, 960px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     position: relative;
+    box-sizing: border-box;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     color: var(--acq-text);
 }
@@ -250,10 +281,18 @@
 
 .acquisition-modal-close {
     position: absolute;
-    top: 12px;
-    right: 14px;
+    top: 10px;
+    right: 10px;
+    z-index: 2;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
     background: transparent;
     border: none;
+    border-radius: 50%;
     color: var(--acq-text-secondary);
     font-size: 1.8em;
     cursor: pointer;
@@ -262,37 +301,58 @@
 
 .acquisition-modal-close:hover {
     color: var(--acq-text);
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .acquisition-modal-body {
     display: flex;
-    gap: 20px;
-    padding: 24px;
+    gap: 28px;
+    padding: 28px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    min-height: 0;
 }
 
 .acquisition-modal-sidebar {
     flex-shrink: 0;
-    width: 160px;
+    width: 200px;
+}
+
+.acquisition-modal-poster-box {
+    position: sticky;
+    top: 0;
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    border-radius: var(--acq-radius);
+    overflow: hidden;
+    background: #181818;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 .acquisition-modal-poster {
     width: 100%;
-    border-radius: var(--acq-radius);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    height: 100%;
+    object-fit: cover;
+    display: block;
 }
 
+/* min-width: 0 lets long release names and button rows wrap instead of widening the modal past the screen */
 .acquisition-modal-main {
-    flex-grow: 1;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .acquisition-modal-title {
     margin: 0 0 4px 0;
-    font-size: 1.5em;
+    padding-right: 40px;
+    font-size: 1.6em;
+    line-height: 1.25;
     color: var(--acq-text);
+    overflow-wrap: anywhere;
 }
 
 .acquisition-modal-title .year {
-    color: #888;
+    color: var(--acq-text-secondary);
     font-weight: normal;
 }
 
@@ -306,7 +366,62 @@
     font-size: 0.9em;
     line-height: 1.5;
     color: var(--acq-text-secondary);
-    margin-bottom: 20px;
+    margin: 0 0 20px 0;
+}
+
+.acquisition-modal-content h3 {
+    margin: 0 0 12px 0;
+    font-size: 1.1em;
+    font-weight: 600;
+    color: var(--acq-text);
+}
+
+.acquisition-modal-content input[type="checkbox"],
+.acquisition-modal-content input[type="radio"] {
+    accent-color: rgb(var(--acq-accent));
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.acquisition-field-label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+/* Jellyfin does not upgrade a select added after the page loads, so it is styled here to match the theme */
+.acquisition-select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    font-size: 0.95em;
+    color: var(--acq-text);
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: calc(var(--acq-radius) * 0.66);
+    cursor: pointer;
+}
+
+.acquisition-select option {
+    color: #fff;
+    background: #202020;
+}
+
+.acquisition-select:focus {
+    outline: none;
+    border-color: rgba(var(--acq-accent), 0.8);
+}
+
+.acquisition-error {
+    margin: 0 0 12px 0;
+    padding: 8px 12px;
+    border-radius: calc(var(--acq-radius) * 0.66);
+    background: rgba(255, 152, 0, 0.12);
+    color: #ffb74d;
+    font-size: 0.9em;
 }
 
 .acquisition-btn-primary {
@@ -317,6 +432,7 @@
     padding: 10px 18px;
     font-size: 0.95em;
     font-weight: bold;
+    white-space: nowrap;
     cursor: pointer;
     transition: background 0.3s var(--acq-ease);
 }
@@ -335,8 +451,9 @@
     color: #fff;
     border: 1px solid transparent;
     border-radius: calc(var(--acq-radius) * 0.66);
-    padding: 8px 14px;
+    padding: 9px 14px;
     font-size: 0.9em;
+    white-space: nowrap;
     cursor: pointer;
     transition: background 0.3s var(--acq-ease), border-color 0.3s var(--acq-ease);
 }
@@ -345,71 +462,153 @@
     background: var(--acq-secondary-bg-hover);
 }
 
+.acquisition-btn-secondary:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
 .acq-theme-abyss .acquisition-btn-secondary {
     border-color: rgba(var(--acq-accent), 0.12);
 }
 
 /* Scope checklist */
 .acquisition-scope-area {
-    margin-top: 15px;
+    margin-top: 4px;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding-top: 15px;
+    padding-top: 18px;
 }
 
 .scope-options {
     display: flex;
-    gap: 16px;
-    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 10px 24px;
+    margin-bottom: 14px;
+}
+
+.scope-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
 }
 
 .episodes-checklist {
-    max-height: 220px;
+    max-height: min(46vh, 440px);
     overflow-y: auto;
+    overscroll-behavior: contain;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: calc(var(--acq-radius) * 0.66);
-    padding: 10px;
-    margin-bottom: 12px;
+    padding: 6px;
+    margin-bottom: 14px;
     background: rgba(0, 0, 0, 0.2);
 }
 
+.episodes-checklist > em {
+    display: block;
+    padding: 8px;
+}
+
 .season-block {
-    margin-bottom: 10px;
+    border-radius: calc(var(--acq-radius) * 0.5);
+}
+
+.season-block + .season-block {
+    margin-top: 2px;
 }
 
 .season-title {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 10px;
+    padding: 8px;
     font-size: 0.95em;
-    color: #fff;
-    margin-bottom: 4px;
+    color: var(--acq-text);
+    cursor: pointer;
+    list-style: none;
+    border-radius: calc(var(--acq-radius) * 0.5);
+}
+
+.season-title::-webkit-details-marker {
+    display: none;
+}
+
+.season-title:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.season-title::after {
+    content: "\25B8";
+    margin-left: auto;
+    color: var(--acq-text-secondary);
+    transition: transform 0.2s var(--acq-ease);
+}
+
+.season-block[open] > .season-title::after {
+    transform: rotate(90deg);
+}
+
+.season-title strong {
+    white-space: nowrap;
+}
+
+.season-count {
+    font-size: 0.85em;
+    color: var(--acq-text-secondary);
 }
 
 .episodes-sublist {
-    margin-left: 20px;
+    margin: 0 0 6px 26px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
 }
 
 .episode-item {
-    font-size: 0.85em;
+    font-size: 0.88em;
     display: flex;
-    align-items: center;
-    gap: 6px;
-    color: #ccc;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 5px 8px;
+    color: #ddd;
+    border-radius: calc(var(--acq-radius) * 0.5);
+    cursor: pointer;
+}
+
+.episode-item input {
+    margin-top: 2px;
+}
+
+.episode-item:hover {
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .episode-item.has-file {
     opacity: 0.5;
 }
 
+.episode-number {
+    flex-shrink: 0;
+    min-width: 3.2em;
+    color: var(--acq-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.episode-note {
+    color: var(--acq-text-secondary);
+    font-size: 0.9em;
+}
+
+.scope-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
 /* Status View */
 .acquisition-status-area {
-    margin-top: 15px;
+    margin-top: 4px;
     background: rgba(255, 255, 255, 0.05);
     border-radius: var(--acq-radius);
-    padding: 12px;
+    padding: 16px;
 }
 
 .status-box {
@@ -418,50 +617,59 @@
 }
 
 .status-label {
-    color: #888;
+    color: var(--acq-text-secondary);
     margin-right: 6px;
 }
 
 .acquisition-progress {
-    font-size: 0.85em;
+    font-size: 0.88em;
+    line-height: 1.5;
     color: #ccc;
-    margin: 0 0 10px 0;
+    margin: 0 0 12px 0;
+}
+
+.acquisition-progress > div + div {
+    margin-top: 4px;
 }
 
 .acquisition-progress-issues {
     margin: 6px 0 0 0;
     padding-left: 18px;
     color: #ffb74d;
+    overflow-wrap: anywhere;
 }
 
 .acquisition-progress-hint {
-    margin-top: 6px;
-    padding: 6px 10px;
+    margin-top: 8px;
+    padding: 8px 12px;
     border-radius: calc(var(--acq-radius) * 0.66);
     background: rgba(var(--acq-accent), 0.12);
     color: #fff;
 }
 
 #status-detail {
-    font-size: 0.85em;
+    font-size: 0.88em;
     color: #aaa;
     margin: 6px 0 10px 0;
+    overflow-wrap: anywhere;
 }
 
-/* Manual Release Selection Table */
+.status-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+/* Manual Release Selection */
 .releases-selection-list {
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: var(--acq-radius);
-    padding: 12px;
-    max-height: 250px;
-    overflow-y: auto;
+    margin-top: 16px;
 }
 
 .releases-table {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
 }
 
 .release-row {
@@ -475,11 +683,17 @@
 }
 
 .release-row.ineligible {
-    opacity: 0.6;
+    opacity: 0.65;
 }
 
 .release-info {
-    flex-grow: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.release-action {
+    flex-shrink: 0;
 }
 
 .release-meta {
@@ -494,13 +708,103 @@
     margin-top: 4px;
 }
 
+.rejection-reasons span + span::before {
+    content: " · ";
+}
+
 .label-ineligible {
     font-size: 0.8em;
     color: #888;
+    white-space: nowrap;
 }
 
-.status-actions {
-    display: flex;
-    gap: 10px;
+.releases-discarded {
     margin-top: 10px;
+}
+
+.releases-discarded > summary {
+    cursor: pointer;
+    padding: 6px 2px;
+    font-size: 0.88em;
+    color: var(--acq-text-secondary);
+}
+
+.releases-discarded > .releases-table {
+    margin-top: 8px;
+}
+
+/* Phones: the modal becomes a bottom sheet and the poster sits next to the title instead of in a column */
+@media (max-width: 600px) {
+    .acquisition-modal-overlay {
+        padding: 0;
+        align-items: flex-end;
+    }
+
+    .acquisition-modal-content {
+        width: 100%;
+        max-height: 92vh;
+        max-height: 92dvh;
+        border-radius: calc(var(--acq-radius) + 4px) calc(var(--acq-radius) + 4px) 0 0;
+        border-bottom: none;
+    }
+
+    .acquisition-modal-body {
+        display: grid;
+        grid-template-columns: 84px minmax(0, 1fr);
+        grid-auto-rows: max-content;
+        align-content: start;
+        gap: 0 14px;
+        padding: 18px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .acquisition-modal-sidebar {
+        width: auto;
+        grid-row: span 2;
+        margin-bottom: 14px;
+    }
+
+    .acquisition-modal-poster-box {
+        position: static;
+    }
+
+    .acquisition-modal-main {
+        display: contents;
+    }
+
+    .acquisition-modal-main > * {
+        grid-column: 1 / -1;
+    }
+
+    .acquisition-modal-main > .acquisition-modal-title {
+        grid-column: 2;
+        align-self: end;
+        font-size: 1.3em;
+    }
+
+    .acquisition-modal-main > .acquisition-modal-meta {
+        grid-column: 2;
+        align-self: start;
+    }
+
+    .acquisition-status-area {
+        padding: 12px;
+    }
+
+    .status-actions > button,
+    .scope-actions > button {
+        flex: 1 1 auto;
+    }
+
+    .episodes-sublist {
+        margin-left: 8px;
+    }
+
+    .release-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .release-action .acquisition-btn-secondary {
+        width: 100%;
+    }
 }

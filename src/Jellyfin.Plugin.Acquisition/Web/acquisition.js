@@ -381,8 +381,7 @@
         const card = document.createElement('div');
         card.className = 'acquisition-card';
 
-        const apiBase = getApiBase();
-        const posterSrc = item.posterUrl ? (item.posterUrl.startsWith('/') ? `${apiBase}${item.posterUrl}` : item.posterUrl) : 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="140" height="210" fill="%23333"><rect width="100%" height="100%"/></svg>';
+        const posterSrc = resolvePosterSrc(item);
         const kindLabel = item.kind === 'Movie' ? 'Película' : 'Serie';
         const yearLabel = item.year ? `(${item.year})` : '';
 
@@ -394,7 +393,7 @@
 
         card.innerHTML = `
             <div class="acquisition-card-image-box">
-                <img class="acquisition-card-image" src="${escapeHtml(posterSrc)}" alt="${escapeHtml(item.title)}" loading="lazy" />
+                ${posterHtml(item, posterSrc, 'acquisition-card-image')}
                 ${badgeHtml}
             </div>
             <div class="acquisition-card-content">
@@ -403,11 +402,35 @@
             </div>
         `;
 
+        bindPosterFallback(card);
         card.addEventListener('click', () => {
             openDetailsModal(item);
         });
 
         return card;
+    }
+
+    function resolvePosterSrc(item) {
+        if (!item.posterUrl) return '';
+        return item.posterUrl.startsWith('/') ? `${getApiBase()}${item.posterUrl}` : item.posterUrl;
+    }
+
+    // A poster that is missing or fails to load is replaced by the kind icon and the title, like Jellyfin's own cards
+    function posterHtml(item, src, imgClass) {
+        const icon = item.kind === 'Movie' ? 'movie' : 'tv';
+        const fallback = `<div class="acquisition-poster-fallback"${src ? ' style="display: none;"' : ''}>` +
+            `<span class="material-icons ${icon}" aria-hidden="true"></span><span>${escapeHtml(item.title)}</span></div>`;
+        const img = src ? `<img class="${imgClass}" src="${escapeHtml(src)}" alt="${escapeHtml(item.title)}" loading="lazy" />` : '';
+        return img + fallback;
+    }
+
+    function bindPosterFallback(root) {
+        root.querySelectorAll('img').forEach(img => img.addEventListener('error', () => {
+            const fallback = img.parentElement && img.parentElement.querySelector('.acquisition-poster-fallback');
+            if (!fallback) return;
+            img.remove();
+            fallback.style.display = '';
+        }));
     }
 
     async function readErrorMessage(resp, fallback) {
@@ -426,6 +449,7 @@
             fetch(`${getApiBase()}/Acquisition/requests/${encodeURIComponent(orphanId)}`, { method: 'DELETE', headers: getAuthHeaders() })
                 .catch(err => console.warn('[Acquisition] Could not cancel unconfirmed request:', err));
         }
+        modal.dispatchEvent(new Event('acquisition-closed'));
         modal.remove();
     }
 
@@ -449,25 +473,25 @@
         const apiBase = getApiBase();
         const kindLabel = item.kind === 'Movie' ? 'Película' : 'Serie';
         const yearLabel = item.year ? `(${item.year})` : '';
-        const posterSrc = item.posterUrl ? (item.posterUrl.startsWith('/') ? `${apiBase}${item.posterUrl}` : item.posterUrl) : '';
+        const posterSrc = resolvePosterSrc(item);
 
         modal.innerHTML = `
-            <div class="acquisition-modal-content">
-                <button class="acquisition-modal-close" id="modal-close">&times;</button>
+            <div class="acquisition-modal-content" role="dialog" aria-modal="true" aria-label="${escapeHtml(item.title)}">
+                <button type="button" class="acquisition-modal-close" id="modal-close" aria-label="Cerrar" title="Cerrar">&times;</button>
                 <div class="acquisition-modal-body">
                     <div class="acquisition-modal-sidebar">
-                        ${posterSrc ? `<img src="${escapeHtml(posterSrc)}" class="acquisition-modal-poster" alt="${escapeHtml(item.title)}" />` : ''}
+                        <div class="acquisition-modal-poster-box">${posterHtml(item, posterSrc, 'acquisition-modal-poster')}</div>
                     </div>
                     <div class="acquisition-modal-main">
                         <h2 class="acquisition-modal-title">${escapeHtml(item.title)} <span class="year">${yearLabel}</span></h2>
                         <div class="acquisition-modal-meta">${kindLabel}</div>
                         <p class="acquisition-modal-overview">${escapeHtml(item.overview || 'Sin descripción disponible.')}</p>
 
-                        <div id="acquisition-destination-area" class="acquisition-destination-area" style="display: none; margin-bottom: 15px;">
-                            <label for="acquisition-destination-select" style="display: block; font-weight: bold; margin-bottom: 5px;">Destino:</label>
-                            <select id="acquisition-destination-select" class="emby-select" style="width: 100%; padding: 6px 10px; border-radius: 4px;"></select>
+                        <div id="acquisition-destination-area" class="acquisition-destination-area" style="display: none; margin-bottom: 16px;">
+                            <label for="acquisition-destination-select" class="acquisition-field-label">Destino</label>
+                            <select id="acquisition-destination-select" class="acquisition-select"></select>
                         </div>
-                        <p id="acquisition-request-error" style="display: none; color: #ff9800;"></p>
+                        <p id="acquisition-request-error" class="acquisition-error" style="display: none;"></p>
 
                         <div id="acquisition-action-area" class="acquisition-action-area">
                             <button id="btn-add-library" class="acquisition-btn-primary">Añadir a biblioteca</button>
@@ -502,7 +526,7 @@
                                 <button id="btn-add-episodes" class="acquisition-btn-secondary" style="display: none;">Añadir temporadas o episodios</button>
                                 <button id="btn-cancel-request" class="acquisition-btn-secondary" style="display: none;">Cancelar solicitud</button>
                             </div>
-                            <div id="releases-container" class="releases-selection-list" style="display: none; margin-top: 15px;"></div>
+                            <div id="releases-container" class="releases-selection-list" style="display: none;"></div>
                         </div>
                     </div>
                 </div>
@@ -510,7 +534,13 @@
         `;
 
         document.body.appendChild(modal);
+        bindPosterFallback(modal);
 
+        const onKeyDown = (e) => {
+            if (e.key === 'Escape' && document.body.contains(modal)) closeModal(modal);
+        };
+        document.addEventListener('keydown', onKeyDown);
+        modal.addEventListener('acquisition-closed', () => document.removeEventListener('keydown', onKeyDown));
         modal.querySelector('#modal-close').addEventListener('click', () => closeModal(modal));
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeModal(modal);
@@ -795,31 +825,44 @@
                 seasons[e.seasonNumber].push(e);
             });
 
+            // Specials (season 0) go last; with a single regular season it starts expanded
+            const seasonNumbers = Object.keys(seasons).map(Number).sort((a, b) => (a === 0) - (b === 0) || a - b);
+            const regularSeasons = seasonNumbers.filter(n => n !== 0).length;
             let html = '';
-            for (const sNum of Object.keys(seasons).sort((a,b) => a - b)) {
+            for (const sNum of seasonNumbers) {
+                const list = seasons[sNum].sort((a, b) => a.episodeNumber - b.episodeNumber);
+                const owned = list.filter(ep => ep.hasFile || ep.requested).length;
+                const countText = owned
+                    ? `${list.length} episodios · ${owned} ya en biblioteca o solicitados`
+                    : `${list.length} episodio${list.length === 1 ? '' : 's'}`;
+                const allOwned = owned === list.length;
                 html += `
-                    <div class="season-block">
-                        <label class="season-title">
-                            <input type="checkbox" class="chk-season" value="${sNum}" />
-                            <strong>Temporada ${sNum}</strong>
-                        </label>
+                    <details class="season-block"${sNum !== 0 && regularSeasons === 1 ? ' open' : ''}>
+                        <summary class="season-title">
+                            <input type="checkbox" class="chk-season" value="${sNum}"${allOwned ? ' disabled' : ''} aria-label="Seleccionar ${sNum === 0 ? 'especiales' : `temporada ${sNum}`}" />
+                            <strong>${sNum === 0 ? 'Especiales' : `Temporada ${sNum}`}</strong>
+                            <span class="season-count">${countText}</span>
+                        </summary>
                         <div class="episodes-sublist">
                 `;
-                seasons[sNum].forEach(ep => {
-                    const note = ep.hasFile ? '(Ya en biblioteca)' : ep.requested ? '(Ya solicitado)' : '';
+                list.forEach(ep => {
+                    const note = ep.hasFile ? 'Ya en biblioteca' : ep.requested ? 'Ya solicitado' : '';
                     html += `
                         <label class="episode-item ${ep.hasFile ? 'has-file' : ''}">
                             <input type="checkbox" class="chk-episode" value="${ep.episodeNumber}" data-id="${ep.id}" data-season="${sNum}" ${ep.hasFile || ep.requested ? 'disabled checked' : ''} />
-                            <span>Ep. ${ep.episodeNumber}: ${escapeHtml(ep.title)} ${note}</span>
+                            <span class="episode-number">Ep. ${ep.episodeNumber}</span>
+                            <span>${escapeHtml(ep.title)}${note ? ` <span class="episode-note">· ${note}</span>` : ''}</span>
                         </label>
                     `;
                 });
-                html += `</div></div>`;
+                html += `</div></details>`;
             }
 
             container.innerHTML = html;
 
             container.querySelectorAll('.chk-season').forEach(sBox => {
+                // Ticking the season inside the summary must not fold or unfold it
+                sBox.addEventListener('click', (e) => e.stopPropagation());
                 sBox.addEventListener('change', (e) => {
                     const season = e.target.value;
                     container.querySelectorAll(`.chk-episode[data-season="${season}"]:not(:disabled)`).forEach(epBox => {
@@ -1034,9 +1077,7 @@
                     return;
                 }
 
-                let html = '<div class="releases-table">';
-                releases.forEach(rel => {
-                    html += `
+                const rowHtml = (rel) => `
                         <div class="release-row ${rel.isEligible ? 'eligible' : 'ineligible'}">
                             <div class="release-info">
                                 <strong>${escapeHtml(rel.title)}</strong>
@@ -1054,8 +1095,17 @@
                             </div>
                         </div>
                     `;
-                });
-                html += '</div>';
+                // The ones that can be chosen come first; the discarded ones stay folded with their reasons
+                const eligible = releases.filter(r => r.isEligible);
+                const discarded = releases.filter(r => !r.isEligible);
+                let html = eligible.length
+                    ? `<div class="releases-table">${eligible.map(rowHtml).join('')}</div>`
+                    : '<em>Ninguna release encontrada es válida para este episodio o película.</em>';
+                if (discarded.length) {
+                    html += `<details class="releases-discarded"${eligible.length ? '' : ' open'}>` +
+                        `<summary>${discarded.length} descartada${discarded.length === 1 ? '' : 's'} (ver motivos)</summary>` +
+                        `<div class="releases-table">${discarded.map(rowHtml).join('')}</div></details>`;
+                }
                 releasesContainer.innerHTML = html;
 
                 releasesContainer.querySelectorAll('.btn-select-release').forEach(btn => {
@@ -1123,7 +1173,7 @@
                         btnViewLocal.style.display = 'inline-block';
                         btnViewLocal.onclick = () => {
                             window.location.hash = `#!/details?id=${encodeURIComponent(req.localItemId)}`;
-                            modal.remove();
+                            closeModal(modal);
                         };
                     } else {
                         btnViewLocal.style.display = 'none';
