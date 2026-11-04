@@ -320,7 +320,7 @@ public class ReleaseService : IReleaseService
         var wrong = comparisons.FirstOrDefault(c => c.Found != c.Expected);
         return wrong.Name == null
             ? (true, null)
-            : (false, $"Identity mismatch: release is tagged {wrong.Name} {wrong.Found}, expected {wrong.Expected}");
+            : (false, $"Es otro título: el indexador la etiqueta como {wrong.Name} {wrong.Found} y se buscaba {wrong.Expected}.");
     }
 
     private async Task TryEnrichFromArrParseAsync(ReleaseCandidate candidate, AcquisitionRequest request, CancellationToken ct)
@@ -340,17 +340,17 @@ public class ReleaseService : IReleaseService
                         if (request.ArrId.HasValue && parseResult.Series.Id > 0)
                         {
                             seriesMatches = parseResult.Series.Id == request.ArrId.Value;
-                            mismatch = $"Identity mismatch (Sonarr parsed series ID {parseResult.Series.Id} != expected {request.ArrId.Value})";
+                            mismatch = $"Es otra serie: Sonarr la identifica con otro ID (serie {parseResult.Series.Id}; se buscaba la {request.ArrId.Value}).";
                         }
                         else if (!string.IsNullOrEmpty(request.ProviderIds.Tvdb) && parseResult.Series.TvdbId > 0)
                         {
                             seriesMatches = parseResult.Series.TvdbId.ToString() == request.ProviderIds.Tvdb;
-                            mismatch = $"Identity mismatch (Sonarr parsed TVDB {parseResult.Series.TvdbId} != expected {request.ProviderIds.Tvdb})";
+                            mismatch = $"Es otra serie: Sonarr la identifica como TVDB {parseResult.Series.TvdbId} y se buscaba TVDB {request.ProviderIds.Tvdb}.";
                         }
                         else if (!string.IsNullOrEmpty(parseResult.Series.Title))
                         {
                             seriesMatches = string.Equals(parseResult.Series.Title.Trim(), request.Title.Trim(), StringComparison.OrdinalIgnoreCase);
-                            mismatch = $"Identity mismatch (Sonarr parsed title '{parseResult.Series.Title}' != expected '{request.Title}')";
+                            mismatch = $"Es otra serie: Sonarr la identifica como «{parseResult.Series.Title}» y se buscaba «{request.Title}».";
                         }
                     }
 
@@ -400,17 +400,17 @@ public class ReleaseService : IReleaseService
                         if (request.ArrId.HasValue && parseResult.Movie.Id > 0)
                         {
                             movieMatches = parseResult.Movie.Id == request.ArrId.Value;
-                            mismatch = $"Identity mismatch (Radarr parsed movie ID {parseResult.Movie.Id} != expected {request.ArrId.Value})";
+                            mismatch = $"Es otra película: Radarr la identifica con otro ID (película {parseResult.Movie.Id}; se buscaba la {request.ArrId.Value}).";
                         }
                         else if (!string.IsNullOrEmpty(request.ProviderIds.Tmdb) && parseResult.Movie.TmdbId > 0)
                         {
                             movieMatches = parseResult.Movie.TmdbId.ToString() == request.ProviderIds.Tmdb;
-                            mismatch = $"Identity mismatch (Radarr parsed TMDb {parseResult.Movie.TmdbId} != expected {request.ProviderIds.Tmdb})";
+                            mismatch = $"Es otra película: Radarr la identifica como TMDB {parseResult.Movie.TmdbId} y se buscaba TMDB {request.ProviderIds.Tmdb}.";
                         }
                         else if (!string.IsNullOrEmpty(parseResult.Movie.Title))
                         {
                             movieMatches = string.Equals(parseResult.Movie.Title.Trim(), request.Title.Trim(), StringComparison.OrdinalIgnoreCase);
-                            mismatch = $"Identity mismatch (Radarr parsed title '{parseResult.Movie.Title}' != expected '{request.Title}')";
+                            mismatch = $"Es otra película: Radarr la identifica como «{parseResult.Movie.Title}» y se buscaba «{request.Title}».";
                         }
                     }
 
@@ -459,6 +459,11 @@ public class ReleaseService : IReleaseService
         }
     }
 
+    private const string NotTorrentReason = "No es un torrent.";
+
+    private static string FormatSize(long bytes) =>
+        (bytes / 1073741824.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " GB";
+
     private static void EvaluateCandidate(ReleaseCandidate candidate, AcquisitionRequest request, DownloadUnit? unit, IReadOnlyList<string> aliases, Configuration.PluginConfiguration? config)
     {
         var reasons = new List<string>(candidate.RejectionReasons);
@@ -466,7 +471,7 @@ public class ReleaseService : IReleaseService
         // 1. Mandatory: Protocol must be torrent
         if (!candidate.IsTorrent)
         {
-            reasons.Add("Protocol is not torrent");
+            reasons.Add(NotTorrentReason);
         }
 
         // 2. Mandatory: Identity verification & fallback (N05, H07 & J03). A release identified as another title (by
@@ -476,6 +481,7 @@ public class ReleaseService : IReleaseService
             candidate.IdentityVerified = true;
         }
 
+        var reasonsBeforeIdentity = reasons.Count;
         if (!candidate.IdentityVerified && !candidate.IdentityRejected)
         {
             // Clean trailing year in parentheses like "Doctor Who (2005)" without affecting numeric titles like "1923"
@@ -524,7 +530,7 @@ public class ReleaseService : IReleaseService
 
             if (!titlesMatch)
             {
-                reasons.Add($"Title mismatch: release title '{normCand}' does not match requested title '{normReq}'");
+                reasons.Add($"El título no coincide: la release se llama «{normCand}» y se buscaba «{normReq}».");
             }
             else
             {
@@ -535,11 +541,11 @@ public class ReleaseService : IReleaseService
                         var allYears = YearRegex.Matches(candidate.Title).Select(m => int.Parse(m.Value)).ToList();
                         if (allYears.Count == 0)
                         {
-                            reasons.Add("Year mismatch: movie release lacks required year token to verify identity");
+                            reasons.Add("No indica el año y no se puede comprobar que sea la película pedida.");
                         }
                         else if (!allYears.Any(y => Math.Abs(y - request.Year.Value) <= 1))
                         {
-                            reasons.Add($"Year mismatch (found {string.Join(',', allYears)}, expected {request.Year.Value})");
+                            reasons.Add($"Es de otro año ({string.Join(", ", allYears)}; se buscaba {request.Year.Value}).");
                         }
                         else
                         {
@@ -548,7 +554,7 @@ public class ReleaseService : IReleaseService
                     }
                     else if (Math.Abs(candidateYear.Value - request.Year.Value) > 1)
                     {
-                        reasons.Add($"Year mismatch (found {candidateYear.Value}, expected {request.Year.Value})");
+                        reasons.Add($"Es de otro año ({candidateYear.Value}; se buscaba {request.Year.Value}).");
                     }
                     else
                     {
@@ -561,7 +567,7 @@ public class ReleaseService : IReleaseService
                     {
                         if (Math.Abs(candidateYear.Value - request.Year.Value) > 1)
                         {
-                            reasons.Add($"Year mismatch (found {candidateYear.Value}, expected {request.Year.Value})");
+                            reasons.Add($"Es de otro año ({candidateYear.Value}; se buscaba {request.Year.Value}).");
                         }
                         else
                         {
@@ -579,9 +585,9 @@ public class ReleaseService : IReleaseService
                 }
             }
 
-            if (!candidate.IdentityVerified && !reasons.Any(r => r.Contains("mismatch")))
+            if (!candidate.IdentityVerified && reasons.Count == reasonsBeforeIdentity)
             {
-                reasons.Add("Identity unresolved: unable to verify release identity with Arr or strict title/year match");
+                reasons.Add("No se pudo comprobar que sea el título pedido.");
             }
         }
 
@@ -634,25 +640,25 @@ public class ReleaseService : IReleaseService
             {
                 if (candidate.SeasonNumber > 0 && candidate.SeasonNumber != targetSeason.Value)
                 {
-                    reasons.Add($"Season mismatch (found S{candidate.SeasonNumber:D2}, expected S{targetSeason.Value:D2})");
+                    reasons.Add($"Es otra temporada (S{candidate.SeasonNumber:D2}; se buscaba S{targetSeason.Value:D2}).");
                 }
 
                 if (isFullSeason)
                 {
                     if (!candidate.IsSeasonPack)
                     {
-                        reasons.Add("Coverage mismatch: requested full season pack, but release is an individual episode");
+                        reasons.Add("Es un episodio suelto y se buscaba la temporada completa.");
                     }
                 }
                 else if (targetEpisode.HasValue)
                 {
                     if (candidate.IsSeasonPack)
                     {
-                        reasons.Add("Coverage mismatch: requested individual episode, but release is a season pack");
+                        reasons.Add("Es un pack de temporada y se buscaba un solo episodio.");
                     }
                     else if (candidate.EpisodeNumber > 0 && candidate.EpisodeNumber != targetEpisode.Value)
                     {
-                        reasons.Add($"Episode mismatch (found E{candidate.EpisodeNumber:D2}, expected E{targetEpisode.Value:D2})");
+                        reasons.Add($"Es otro episodio (E{candidate.EpisodeNumber:D2}; se buscaba E{targetEpisode.Value:D2}).");
                     }
                     else if (candidate.EpisodeNumber <= 0 && candidate.AbsoluteEpisodeNumber > 0)
                     {
@@ -660,37 +666,40 @@ public class ReleaseService : IReleaseService
                         var targetAbsolute = unit != null && unit.AbsoluteEpisodeNumbers.Count == 1 ? unit.AbsoluteEpisodeNumbers[0] : (int?)null;
                         if (targetAbsolute == null)
                         {
-                            reasons.Add("Episode mismatch: release uses absolute numbering but the requested episode has no absolute number in Sonarr");
+                            reasons.Add("Usa numeración absoluta y Sonarr no tiene ese número para el episodio pedido.");
                         }
                         else if (candidate.AbsoluteEpisodeNumber != targetAbsolute.Value)
                         {
-                            reasons.Add($"Episode mismatch (found absolute {candidate.AbsoluteEpisodeNumber}, expected {targetAbsolute.Value})");
+                            reasons.Add($"Es otro episodio (número absoluto {candidate.AbsoluteEpisodeNumber}; se buscaba el {targetAbsolute.Value}).");
                         }
                     }
                     else if (candidate.EpisodeNumber <= 0 && !candidate.IsSeasonPack)
                     {
-                        reasons.Add("Episode mismatch: release does not specify episode number for single episode request");
+                        reasons.Add("No indica qué episodio es y se buscaba uno concreto.");
                     }
                 }
             }
         }
+
+        // Everything but the protocol is an identity or scope problem a manual choice must not override
+        candidate.IdentityOrScopeMismatch = reasons.Any(r => r != NotTorrentReason);
 
         // 5. Mandatory: Size limits
         if (config != null)
         {
             if (request.Kind == MediaKind.Movie && config.MaxMovieSizeBytes > 0 && candidate.Size > config.MaxMovieSizeBytes)
             {
-                reasons.Add($"Size exceeds movie limit ({candidate.Size} > {config.MaxMovieSizeBytes})");
+                reasons.Add($"Pesa más del límite para películas ({FormatSize(candidate.Size)}; el máximo es {FormatSize(config.MaxMovieSizeBytes)}).");
             }
             else if (request.Kind == MediaKind.Series)
             {
                 if (candidate.IsSeasonPack && config.MaxSeasonSizeBytes > 0 && candidate.Size > config.MaxSeasonSizeBytes)
                 {
-                    reasons.Add($"Size exceeds season limit ({candidate.Size} > {config.MaxSeasonSizeBytes})");
+                    reasons.Add($"Pesa más del límite para temporadas ({FormatSize(candidate.Size)}; el máximo es {FormatSize(config.MaxSeasonSizeBytes)}).");
                 }
                 else if (!candidate.IsSeasonPack && config.MaxEpisodeSizeBytes > 0 && candidate.Size > config.MaxEpisodeSizeBytes)
                 {
-                    reasons.Add($"Size exceeds episode limit ({candidate.Size} > {config.MaxEpisodeSizeBytes})");
+                    reasons.Add($"Pesa más del límite para episodios ({FormatSize(candidate.Size)}; el máximo es {FormatSize(config.MaxEpisodeSizeBytes)}).");
                 }
             }
         }

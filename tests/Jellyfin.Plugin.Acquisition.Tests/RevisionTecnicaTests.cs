@@ -91,17 +91,17 @@ public class RevisionTecnicaTests
         // S01E01 must be rejected for Season mismatch
         var s01e01 = results.First(r => r.Title.Contains("S01E01"));
         Assert.False(s01e01.IsEligible);
-        Assert.Contains(s01e01.RejectionReasons, r => r.Contains("Season mismatch"));
+        Assert.Contains(s01e01.RejectionReasons, r => r.Contains("Es otra temporada"));
 
         // S02E01 must be rejected for Episode mismatch
         var s02e01 = results.First(r => r.Title.Contains("S02E01"));
         Assert.False(s02e01.IsEligible);
-        Assert.Contains(s02e01.RejectionReasons, r => r.Contains("Episode mismatch"));
+        Assert.Contains(s02e01.RejectionReasons, r => r.Contains("Es otro episodio"));
 
         // S02 Season Pack must be rejected for Coverage mismatch (user requested standalone episode)
         var s02Pack = results.First(r => r.Title.Contains("S02.Complete"));
         Assert.False(s02Pack.IsEligible);
-        Assert.Contains(s02Pack.RejectionReasons, r => r.Contains("Coverage mismatch"));
+        Assert.Contains(s02Pack.RejectionReasons, r => r.Contains("se buscaba un solo episodio"));
 
         // S02E03 must be eligible and top candidate
         var s02e03 = results.First(r => r.Title.Contains("S02E03"));
@@ -1017,12 +1017,12 @@ public class RevisionTecnicaTests
         // 1. Derivative must be rejected for title mismatch
         var spinOff = results.First(r => r.Title.Contains("New.Blood"));
         Assert.False(spinOff.IsEligible);
-        Assert.Contains(spinOff.RejectionReasons, r => r.Contains("Title mismatch"));
+        Assert.Contains(spinOff.RejectionReasons, r => r.Contains("El título no coincide"));
 
         // 2. Remake with wrong year must be rejected for year mismatch
         var remake = results.First(r => r.Title.Contains("1986"));
         Assert.False(remake.IsEligible);
-        Assert.Contains(remake.RejectionReasons, r => r.Contains("Year mismatch"));
+        Assert.Contains(remake.RejectionReasons, r => r.Contains("Es de otro año"));
 
         // 3. Exact series must be eligible and picked
         var correct = results.First(r => r.Title == "Dexter.S01E01.1080p.WEB-DL");
@@ -1368,7 +1368,7 @@ public class RevisionTecnicaTests
         var r = results[0];
         Assert.True(r.IsEligible);
         Assert.True(r.IdentityVerified);
-        Assert.DoesNotContain(r.RejectionReasons, reason => reason.Contains("Year mismatch"));
+        Assert.DoesNotContain(r.RejectionReasons, reason => reason.Contains("Es de otro año"));
     }
 
     [Fact]
@@ -1409,7 +1409,7 @@ public class RevisionTecnicaTests
         Assert.Single(results);
         var r = results[0];
         Assert.True(r.IdentityVerified);
-        Assert.DoesNotContain(r.RejectionReasons, reason => reason.Contains("Year mismatch"));
+        Assert.DoesNotContain(r.RejectionReasons, reason => reason.Contains("Es de otro año"));
     }
 
     [Fact]

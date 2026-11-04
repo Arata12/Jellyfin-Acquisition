@@ -43,4 +43,15 @@ public class ReleaseCandidate
     public bool FromIdSearch { get; set; }
 
     public List<string> RejectionReasons { get; set; } = [];
+
+    /// <summary>The release failed an identity, year or scope check (not only protocol or size); it can never be picked.</summary>
+    public bool IdentityOrScopeMismatch { get; set; }
+
+    /// <summary>
+    /// True when the release must not be chosen even manually. Also recognises the reasons stored by earlier versions
+    /// (English "mismatch" / "unresolved") so lists saved before the change keep their protection.
+    /// </summary>
+    [JsonIgnore]
+    public bool HasFatalMismatch => IdentityOrScopeMismatch ||
+        RejectionReasons.Any(r => r.Contains("mismatch", StringComparison.OrdinalIgnoreCase) || r.Contains("unresolved", StringComparison.OrdinalIgnoreCase));
 }

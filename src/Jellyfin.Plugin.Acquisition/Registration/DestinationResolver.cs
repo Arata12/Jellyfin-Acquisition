@@ -100,7 +100,7 @@ public static class DestinationResolver
         catch (Exception ex)
         {
             var service = kind == MediaKind.Series ? "Sonarr" : "Radarr";
-            return new DestinationListResult([], $"No se pudieron leer las carpetas raíz de {service}: {Security.SecurityHelper.RedactSecrets(ex.Message)}");
+            return new DestinationListResult([], $"No se pudieron leer las carpetas raíz de {service}. {Messages.FriendlyErrors.FromException(ex, service)}");
         }
     }
 

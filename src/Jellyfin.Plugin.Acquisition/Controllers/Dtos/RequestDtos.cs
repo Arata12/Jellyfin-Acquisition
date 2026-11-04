@@ -59,6 +59,12 @@ public class ErrorResponseDto
     public string Message { get; set; } = string.Empty;
 }
 
+public class AutoSelectDto
+{
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; }
+}
+
 public class SelectReleaseDto
 {
     [JsonPropertyName("releaseId")]
@@ -211,6 +217,14 @@ public class AcquisitionRequestDto
     [JsonPropertyName("history")]
     public List<RequestHistoryEntry> History { get; set; } = [];
 
+    /// <summary>Next time the tracker searches again (empty-search backoff, a movie waiting for its release); null when it is not waiting.</summary>
+    [JsonPropertyName("nextAttemptUtc")]
+    public DateTimeOffset? NextAttemptUtc { get; set; }
+
+    /// <summary>The tracker picks the best release itself, even in manual selection mode.</summary>
+    [JsonPropertyName("autoReleaseSelection")]
+    public bool AutoReleaseSelection { get; set; }
+
     [JsonPropertyName("progress")]
     public RequestProgressDto Progress { get; set; } = new();
 }
@@ -239,11 +253,21 @@ public class RequestProgressDto
     [JsonPropertyName("attentionItems")]
     public List<UnitIssueDto> AttentionItems { get; set; } = [];
 
+    /// <summary>Downloads dropped by the user or by the 14-day limit.</summary>
+    [JsonPropertyName("skipped")]
+    public int Skipped { get; set; }
+
+    [JsonPropertyName("skippedItems")]
+    public List<UnitIssueDto> SkippedItems { get; set; } = [];
+
     /// <summary>"Serie completa" of an airing series: new episodes are downloaded as they air.</summary>
     [JsonPropertyName("following")]
     public bool Following { get; set; }
 
-    /// <summary>Episode waiting for its air date, e.g. "S01E08 se buscará a partir del 02/11 19:00 UTC".</summary>
+    /// <summary>
+    /// Why nothing is being searched yet: an episode waiting for its air date ("S01E08 se buscará a partir del 02/11 19:00 UTC")
+    /// or a movie waiting for its digital release ("Lanzamiento digital el 12/03/2027; se buscará a partir de esa fecha.").
+    /// </summary>
     [JsonPropertyName("waitingForAir")]
     public string? WaitingForAir { get; set; }
 

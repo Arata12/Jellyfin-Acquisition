@@ -108,11 +108,11 @@ public class ReleaseSelectionTests
         // Usenet release should be rejected
         var usenet = evaluated.First(e => e.Title.Contains("Usenet"));
         Assert.False(usenet.IsEligible);
-        Assert.Contains("Protocol is not torrent", usenet.RejectionReasons);
+        Assert.Contains("No es un torrent.", usenet.RejectionReasons);
 
         // Season 2 release should be rejected for Season 1 request
         var s2 = evaluated.First(e => e.Title.Contains("S02E01"));
         Assert.False(s2.IsEligible);
-        Assert.Contains(s2.RejectionReasons, r => r.Contains("Season mismatch"));
+        Assert.Contains(s2.RejectionReasons, r => r.Contains("Es otra temporada"));
     }
 }

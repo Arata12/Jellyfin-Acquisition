@@ -71,7 +71,7 @@ public class RadarrClient : IRadarrClient
                 {
                     // Without an API key a 401 means "not configured yet", not "credentials rejected"
                     Status = hasApiKey ? ProviderStatus.Unauthorized : ProviderStatus.NotConfigured,
-                    ErrorMessage = hasApiKey ? $"Radarr authentication failed (HTTP {(int)resp.StatusCode}: invalid API key)." : $"Radarr API key is not configured or invalid (HTTP {(int)resp.StatusCode})."
+                    ErrorMessage = hasApiKey ? Messages.FriendlyErrors.FromStatus(resp.StatusCode, "Radarr") : "Falta la clave de API de Radarr o no es válida. Configúrala en el plugin."
                 };
             }
 
@@ -80,7 +80,7 @@ public class RadarrClient : IRadarrClient
                 return new RadarrLookupResult
                 {
                     Status = ProviderStatus.RateLimited,
-                    ErrorMessage = "Radarr rate limit reached (HTTP 429)."
+                    ErrorMessage = Messages.FriendlyErrors.FromStatus(resp.StatusCode, "Radarr")
                 };
             }
 
@@ -90,7 +90,7 @@ public class RadarrClient : IRadarrClient
                 return new RadarrLookupResult
                 {
                     Status = hasApiKey ? ProviderStatus.Unavailable : ProviderStatus.NotConfigured,
-                    ErrorMessage = $"Radarr returned HTTP {resp.StatusCode}."
+                    ErrorMessage = Messages.FriendlyErrors.FromStatus(resp.StatusCode, "Radarr")
                 };
             }
 
@@ -111,7 +111,7 @@ public class RadarrClient : IRadarrClient
             return new RadarrLookupResult
             {
                 Status = hasApiKey ? ProviderStatus.Unavailable : ProviderStatus.NotConfigured,
-                ErrorMessage = ex.Message
+                ErrorMessage = Messages.FriendlyErrors.FromException(ex, "Radarr")
             };
         }
     }

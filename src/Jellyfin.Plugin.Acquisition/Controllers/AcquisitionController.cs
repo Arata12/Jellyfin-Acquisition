@@ -32,6 +32,7 @@ public class AcquisitionController : ControllerBase
     private readonly ISonarrClient _sonarrClient;
     private readonly IRadarrClient? _radarrClient;
     private readonly IQBittorrentClient? _qbClient;
+    private readonly ILocalMatcherService? _localMatcher;
     private readonly IUserManager _userManager;
     private readonly ILogger<AcquisitionController> _logger;
     private readonly ArrRegistrar _registrar;
@@ -51,8 +52,10 @@ public class AcquisitionController : ControllerBase
         IUserManager userManager,
         ILogger<AcquisitionController> logger,
         IRadarrClient? radarrClient = null,
-        IQBittorrentClient? qbClient = null)
+        IQBittorrentClient? qbClient = null,
+        ILocalMatcherService? localMatcher = null)
     {
+        _localMatcher = localMatcher;
         _catalogService = catalogService;
         _requestRepo = requestRepo;
         _trackerService = trackerService;
@@ -196,7 +199,7 @@ public class AcquisitionController : ControllerBase
 
         if (existing != null)
         {
-            return Conflict(new ConflictResponseDto { Message = "An active request already exists for this title.", RequestId = existing.Id });
+            return Conflict(new ConflictResponseDto { Message = "Ya hay una solicitud en curso para este título.", RequestId = existing.Id });
         }
 
         // The destination is resolved on the server from a stable identifier; browser-sent paths are never used
@@ -257,7 +260,7 @@ public class AcquisitionController : ControllerBase
 
             if (request.Status != RequestStatus.Pending)
             {
-                return Conflict("Series registration can only be prepared while request is in Pending status.");
+                return Conflict("La serie solo se puede preparar mientras la solicitud está pendiente.");
             }
 
             var registration = await _registrar.EnsureRegisteredAsync(request, config, ct).ConfigureAwait(false);
@@ -301,24 +304,36 @@ public class AcquisitionController : ControllerBase
 
         if (!request.ArrId.HasValue)
         {
-            return BadRequest("Series must be prepared before retrieving episodes.");
+            return BadRequest(new ErrorResponseDto { Message = "Primero hay que preparar la serie para ver sus episodios." });
         }
 
         var sonarrEpisodes = await _sonarrClient.GetEpisodesAsync(request.ArrId.Value, ct).ConfigureAwait(false);
         if (sonarrEpisodes == null)
         {
-            return StatusCode(StatusCodes.Status502BadGateway, "Unable to communicate with Sonarr to fetch episodes.");
+            return StatusCode(StatusCodes.Status502BadGateway, new ErrorResponseDto { Message = "No se pudo consultar a Sonarr para obtener los episodios. Inténtalo de nuevo en unos minutos." });
         }
 
-        var dtos = sonarrEpisodes.Select(e => new EpisodeDto
+        // Files copied to the library without Sonarr knowing: present, so they are not downloaded again
+        var local = GetLocalEpisodes(request, sonarrEpisodes);
+
+        // Episodes the user skipped are not "selected" any more, so they can be picked again
+        var skippedIds = request.Units.Where(u => u.Status == RequestStatus.Skipped).SelectMany(u => u.EpisodeIds).ToHashSet();
+
+        var dtos = sonarrEpisodes.Select(e =>
         {
-            Id = e.Id,
-            SeasonNumber = e.SeasonNumber,
-            EpisodeNumber = e.EpisodeNumber,
-            Title = e.Title ?? $"Episode {e.EpisodeNumber}",
-            Overview = e.Overview,
-            HasFile = e.HasFile,
-            IsSelected = request.Scope.All || request.Scope.SeasonNumbers.Contains(e.SeasonNumber) || request.Scope.EpisodeIds.Contains(e.Id)
+            var inJellyfin = !e.HasFile && local.Contains((e.SeasonNumber, e.EpisodeNumber));
+            return new EpisodeDto
+            {
+                Id = e.Id,
+                SeasonNumber = e.SeasonNumber,
+                EpisodeNumber = e.EpisodeNumber,
+                Title = e.Title ?? $"Episodio {e.EpisodeNumber}",
+                Overview = e.Overview,
+                HasFile = e.HasFile || inJellyfin,
+                InJellyfin = inJellyfin,
+                IsSelected = !skippedIds.Contains(e.Id) &&
+                             (request.Scope.All || request.Scope.SeasonNumbers.Contains(e.SeasonNumber) || request.Scope.EpisodeIds.Contains(e.Id))
+            };
         }).ToList();
 
         return Ok(dtos);
@@ -352,7 +367,7 @@ public class AcquisitionController : ControllerBase
 
             if (request.Status != RequestStatus.Pending)
             {
-                return Conflict("Scope can only be confirmed while request is in Pending status.");
+                return Conflict("La selección solo se puede confirmar mientras la solicitud está pendiente.");
             }
 
             request.Scope.All = confirmation.All;
@@ -367,11 +382,12 @@ public class AcquisitionController : ControllerBase
                 var allEpisodes = await _sonarrClient.GetEpisodesAsync(request.ArrId.Value, ct).ConfigureAwait(false);
                 if (allEpisodes != null)
                 {
+                    var local = GetLocalEpisodes(request, allEpisodes);
                     if (request.Scope.All)
                     {
                         var now = DateTime.UtcNow;
                         request.Scope.TargetEpisodes = allEpisodes
-                            .Where(e => e.SeasonNumber > 0 && !e.HasFile && (!e.AirDateUtc.HasValue || e.AirDateUtc.Value <= now))
+                            .Where(e => e.SeasonNumber > 0 && !e.HasFile && !local.Contains((e.SeasonNumber, e.EpisodeNumber)) && (!e.AirDateUtc.HasValue || e.AirDateUtc.Value <= now))
                             .Select(e => new EpisodeTarget
                             {
                                 SeriesId = request.ArrId.Value,
@@ -394,7 +410,7 @@ public class AcquisitionController : ControllerBase
                         var selectedSeasons = new HashSet<int>(request.Scope.SeasonNumbers);
 
                         request.Scope.TargetEpisodes = allEpisodes
-                            .Where(e => !e.HasFile && (selectedIds.Contains(e.Id) || selectedSeasons.Contains(e.SeasonNumber)))
+                            .Where(e => !e.HasFile && !local.Contains((e.SeasonNumber, e.EpisodeNumber)) && (selectedIds.Contains(e.Id) || selectedSeasons.Contains(e.SeasonNumber)))
                             .Select(e => new EpisodeTarget
                             {
                                 SeriesId = request.ArrId.Value,
@@ -608,11 +624,11 @@ public class AcquisitionController : ControllerBase
             // Validate identity, year, scope, protocol cannot be bypassed (N05)
             if (!selected.IsTorrent)
             {
-                return BadRequest("Selected release is not a torrent.");
+                return BadRequest(new ErrorResponseDto { Message = "Esa release no es un torrent, así que no se puede descargar." });
             }
-            if (selected.RejectionReasons.Any(r => r.Contains("mismatch", StringComparison.OrdinalIgnoreCase) || r.Contains("unresolved", StringComparison.OrdinalIgnoreCase)))
+            if (selected.HasFatalMismatch)
             {
-                return BadRequest("Cannot select release with incompatible identity, year, or scope.");
+                return BadRequest(new ErrorResponseDto { Message = "Esa release no corresponde a lo pedido (otro título, año, temporada o episodio), así que no se puede elegir." });
             }
 
             // Re-evaluate mandatory coverage and scope conditions against active unit (H06)
@@ -620,15 +636,15 @@ public class AcquisitionController : ControllerBase
             {
                 if (selected.SeasonNumber > 0 && activeUnit.SeasonNumber > 0 && selected.SeasonNumber != activeUnit.SeasonNumber)
                 {
-                    return BadRequest($"Selected release season (S{selected.SeasonNumber}) does not match active unit season (S{activeUnit.SeasonNumber}).");
+                    return BadRequest(new ErrorResponseDto { Message = $"Esa release es de la temporada {selected.SeasonNumber} y se está buscando la {activeUnit.SeasonNumber}." });
                 }
                 if (activeUnit.IsFullSeasonPack && !selected.IsSeasonPack)
                 {
-                    return BadRequest("Selected release is not a season pack for full season request.");
+                    return BadRequest(new ErrorResponseDto { Message = "Se está buscando la temporada completa y esa release es un episodio suelto." });
                 }
                 if (!activeUnit.IsFullSeasonPack && selected.EpisodeNumber > 0 && !activeUnit.EpisodeNumbers.Contains(selected.EpisodeNumber))
                 {
-                    return BadRequest("Selected release does not cover the requested episode.");
+                    return BadRequest(new ErrorResponseDto { Message = "Esa release no es el episodio que se está buscando." });
                 }
             }
 
@@ -643,6 +659,8 @@ public class AcquisitionController : ControllerBase
                     // A manual choice for a download set aside puts it back in the queue
                     activeUnit.Status = RequestStatus.Pending;
                     activeUnit.ErrorMessage = null;
+                    activeUnit.ParkedAtUtc = null;
+                    activeUnit.FirstParkedUtc = null;
                 }
 
                 activeUnit.SelectedRelease = selected;
@@ -691,6 +709,69 @@ public class AcquisitionController : ControllerBase
             RetryOutcome.NotFound => NotFound(),
             RetryOutcome.Forbidden => Forbid(),
             RetryOutcome.InvalidStatus => Conflict(result.ErrorMessage),
+            RetryOutcome.Success => Ok(MapToDto(result.Request!)),
+            _ => StatusCode(StatusCodes.Status500InternalServerError)
+        };
+    }
+
+    /// <summary>
+    /// Drop the downloads set aside for review (parked): the request stops waiting for them and they can be requested again.
+    /// </summary>
+    [HttpPost("requests/{id}/skip-parked")]
+    [Authorize]
+    [ProducesResponseType(typeof(AcquisitionRequestDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<AcquisitionRequestDto>> SkipParked([FromRoute] string id, CancellationToken ct)
+    {
+        var userId = GetValidatedUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        var config = Plugin.Instance?.Configuration;
+        var result = await _trackerService.SkipParkedAsync(
+            id,
+            req => SecurityHelper.CanManageRequest(userId.Value, req, _userManager, config),
+            ct).ConfigureAwait(false);
+
+        return result.Outcome switch
+        {
+            RetryOutcome.NotFound => NotFound(),
+            RetryOutcome.Forbidden => Forbid(),
+            RetryOutcome.InvalidStatus => Conflict(new ErrorResponseDto { Message = result.ErrorMessage ?? "No hay descargas apartadas que omitir." }),
+            RetryOutcome.Success => Ok(MapToDto(result.Request!)),
+            _ => StatusCode(StatusCodes.Status500InternalServerError)
+        };
+    }
+
+    /// <summary>
+    /// Turn automatic release selection on or off for a request (manual mode requests can ask the tracker to pick the best release itself).
+    /// </summary>
+    [HttpPost("requests/{id}/auto-select")]
+    [Authorize]
+    [ProducesResponseType(typeof(AcquisitionRequestDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<AcquisitionRequestDto>> SetAutoSelect([FromRoute] string id, [FromBody] AutoSelectDto dto, CancellationToken ct)
+    {
+        var userId = GetValidatedUserId();
+        if (!userId.HasValue) return Unauthorized();
+
+        var config = Plugin.Instance?.Configuration;
+        var result = await _trackerService.SetAutoSelectAsync(
+            id,
+            dto.Enabled,
+            req => SecurityHelper.CanManageRequest(userId.Value, req, _userManager, config),
+            ct).ConfigureAwait(false);
+
+        return result.Outcome switch
+        {
+            RetryOutcome.NotFound => NotFound(),
+            RetryOutcome.Forbidden => Forbid(),
+            RetryOutcome.InvalidStatus => Conflict(new ErrorResponseDto { Message = result.ErrorMessage ?? "La solicitud ya terminó." }),
             RetryOutcome.Success => Ok(MapToDto(result.Request!)),
             _ => StatusCode(StatusCodes.Status500InternalServerError)
         };
@@ -990,8 +1071,33 @@ public class AcquisitionController : ControllerBase
             UpdatedAt = r.UpdatedAt,
             CompletedAt = r.CompletedAt,
             History = r.History,
-            Progress = BuildProgress(r)
+            Progress = BuildProgress(r),
+            NextAttemptUtc = r.NextAttemptUtc,
+            AutoReleaseSelection = r.AutoReleaseSelection
         };
+    }
+
+    /// <summary>
+    /// Episodes of the series present in the Jellyfin library although Sonarr has no file for them (copied by hand).
+    /// Empty when the library cannot be read.
+    /// </summary>
+    private IReadOnlySet<(int Season, int Episode)> GetLocalEpisodes(AcquisitionRequest request, IReadOnlyList<Adapters.Sonarr.Models.SonarrEpisode> episodes)
+    {
+        if (_localMatcher == null || !episodes.Any(e => e.SeasonNumber > 0 && !e.HasFile))
+        {
+            return new HashSet<(int, int)>();
+        }
+
+        try
+        {
+            return _localMatcher.GetLocalEpisodes(request.UserId, request.Kind, request.Title, request.Year, request.ProviderIds)
+                ?? new HashSet<(int, int)>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read the Jellyfin library episodes of request {Id}", request.Id);
+            return new HashSet<(int, int)>();
+        }
     }
 
     /// <summary>
@@ -1008,6 +1114,11 @@ public class AcquisitionController : ControllerBase
             InProgress = r.Units.Count(u => u.Status is RequestStatus.Searching or RequestStatus.Downloading or RequestStatus.Importing),
             Pending = r.Units.Count(u => u.Status == RequestStatus.Pending),
             Attention = r.Units.Count(u => u.Status is RequestStatus.RequiresAttention or RequestStatus.Failed),
+            Skipped = r.Units.Count(u => u.Status == RequestStatus.Skipped),
+            SkippedItems = r.Units
+                .Where(u => u.Status == RequestStatus.Skipped)
+                .Select(u => new UnitIssueDto { Label = u.Describe(r.Kind), Reason = u.ErrorMessage })
+                .ToList(),
             Current = active != null && active.Status is not (RequestStatus.RequiresAttention or RequestStatus.Failed) ? active.Describe(r.Kind) : null,
             AttentionItems = r.Units
                 .Where(u => u.Status is RequestStatus.RequiresAttention or RequestStatus.Failed)
@@ -1016,7 +1127,7 @@ public class AcquisitionController : ControllerBase
             Following = r.FollowAiring,
             WaitingForAir = active is { Status: RequestStatus.Pending, SelectedRelease: null } && active.SearchableFromUtc > DateTime.UtcNow
                 ? $"{active.Describe(r.Kind)} se buscará a partir del {active.SearchableFromUtc:dd/MM HH:mm} UTC"
-                : null,
+                : r.Status is RequestStatus.Searching or RequestStatus.Pending ? r.WaitingNote : null,
             AwaitingSelection = manual &&
                 r.Status is RequestStatus.Searching or RequestStatus.Pending &&
                 (active?.SelectedRelease ?? r.SelectedRelease) == null &&

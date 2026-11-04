@@ -124,4 +124,7 @@ public class TorrentDownloadResult
     public string? InfoHash { get; set; }
     public bool IsSuccess => TorrentBytes != null || !string.IsNullOrWhiteSpace(MagnetUri);
     public string? ErrorMessage { get; set; }
+
+    /// <summary>The indexer no longer serves this torrent (404/410): retrying the same release is pointless.</summary>
+    public bool IsGone { get; set; }
 }

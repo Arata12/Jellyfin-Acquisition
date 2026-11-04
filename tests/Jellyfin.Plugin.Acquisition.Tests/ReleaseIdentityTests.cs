@@ -45,7 +45,7 @@ public class ReleaseIdentityTests
 
         Assert.Single(results);
         Assert.False(results[0].IsEligible);
-        Assert.Contains(results[0].RejectionReasons, r => r.Contains("Year mismatch"));
+        Assert.Contains(results[0].RejectionReasons, r => r.Contains("Es de otro año"));
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class ReleaseIdentityTests
 
         Assert.Single(results);
         Assert.False(results[0].IsEligible);
-        Assert.Contains(results[0].RejectionReasons, r => r.Contains("Identity mismatch"));
+        Assert.Contains(results[0].RejectionReasons, r => r.Contains("Es otr"));
     }
 
     [Fact]
@@ -158,7 +158,7 @@ public class ReleaseIdentityTests
 
         var wrongId = results.Single(r => r.Title.EndsWith("WRONGID", StringComparison.Ordinal));
         Assert.False(wrongId.IsEligible);
-        Assert.Contains(wrongId.RejectionReasons, r => r.Contains("Identity mismatch", StringComparison.Ordinal) && r.Contains("380654", StringComparison.Ordinal));
+        Assert.Contains(wrongId.RejectionReasons, r => r.Contains("Es otr", StringComparison.Ordinal) && r.Contains("380654", StringComparison.Ordinal));
         Assert.False(results.Single(r => r.Title.StartsWith("Rent-a-Girlfriend", StringComparison.Ordinal)).IsEligible);
         Assert.True(results.Single(r => r.Title.EndsWith("TAGGED", StringComparison.Ordinal)).IsEligible);
         Assert.True(results.Single(r => r.Title.EndsWith("IDSEARCH", StringComparison.Ordinal)).IsEligible);
@@ -233,7 +233,7 @@ public class ReleaseIdentityTests
         var results = await service.SearchAndEvaluateReleasesAsync(GirlfriendGirlfriendE01());
 
         Assert.False(results.Single().IsEligible);
-        Assert.Contains(results.Single().RejectionReasons, r => r.Contains("Identity mismatch", StringComparison.Ordinal));
+        Assert.Contains(results.Single().RejectionReasons, r => r.Contains("Es otr", StringComparison.Ordinal));
     }
 
     [Theory]

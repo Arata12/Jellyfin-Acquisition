@@ -84,6 +84,14 @@ public class RadarrMovie
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTime? InCinemas { get; set; }
 
+    [JsonPropertyName("digitalRelease")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTime? DigitalRelease { get; set; }
+
+    [JsonPropertyName("physicalRelease")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTime? PhysicalRelease { get; set; }
+
     [JsonPropertyName("originalTitle")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? OriginalTitle { get; set; }

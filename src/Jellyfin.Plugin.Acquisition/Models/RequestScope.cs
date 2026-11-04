@@ -62,6 +62,18 @@ public class DownloadUnit
     /// <summary>Consecutive searches without any eligible release.</summary>
     public int SearchAttempts { get; set; }
 
+    /// <summary>When the current run of empty searches started; drives the search backoff. Null once releases are found.</summary>
+    public DateTimeOffset? FirstEmptySearchUtc { get; set; }
+
+    /// <summary>Last time the unit was set aside for review (the daily automatic retry counts from here).</summary>
+    public DateTimeOffset? ParkedAtUtc { get; set; }
+
+    /// <summary>First time the unit was set aside; kept across automatic retries so it can be skipped after 14 days.</summary>
+    public DateTimeOffset? FirstParkedUtc { get; set; }
+
+    /// <summary>Releases (hash, or title and indexer) the indexer no longer serves, so they are not picked again.</summary>
+    public List<string> UnavailableReleases { get; set; } = [];
+
     /// <summary>
     /// Margin after an episode airs before it is searched, so releases have time to appear on the indexers.
     /// </summary>
