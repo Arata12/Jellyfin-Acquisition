@@ -160,12 +160,25 @@ public class LocalMatcherService : ILocalMatcherService
         return dummy.LocalItemId;
     }
 
+    public IReadOnlySet<(int Season, int Episode)> GetLocalEpisodes(Guid userId, MediaKind kind, string title, int? year, ProviderIds providerIds)
+    {
+        var seriesId = kind == MediaKind.Series ? FindLocalMatch(userId, kind, title, year, providerIds) : null;
+        return seriesId.HasValue ? ReadLocalEpisodes(userId, seriesId.Value) ?? [] : new HashSet<(int, int)>();
+    }
+
     public bool AreEpisodesAvailable(Guid userId, Guid seriesId, IReadOnlyList<EpisodeTarget> targets)
     {
         if (targets.Count == 0) return true;
 
+        var existingMap = ReadLocalEpisodes(userId, seriesId);
+        return existingMap != null && targets.All(t => existingMap.Contains((t.SeasonNumber, t.EpisodeNumber)));
+    }
+
+    /// <summary>Episodes of the series with a file in the library; null when they could not be read.</summary>
+    private HashSet<(int Season, int Episode)>? ReadLocalEpisodes(Guid userId, Guid seriesId)
+    {
         var user = _userManager.GetUserById(userId);
-        if (user == null) return false;
+        if (user == null) return null;
 
         try
         {
@@ -176,11 +189,8 @@ public class LocalMatcherService : ILocalMatcherService
                 Recursive = true
             };
 
-            var localEpisodes = _libraryManager.GetItemList(query).OfType<Episode>().ToList();
-            if (localEpisodes.Count == 0) return false;
-
             var existingMap = new HashSet<(int Season, int Episode)>();
-            foreach (var ep in localEpisodes)
+            foreach (var ep in _libraryManager.GetItemList(query).OfType<Episode>())
             {
                 var sNum = ep.ParentIndexNumber ?? 1;
                 var eNum = ep.IndexNumber ?? -1;
@@ -190,12 +200,12 @@ public class LocalMatcherService : ILocalMatcherService
                 }
             }
 
-            return targets.All(t => existingMap.Contains((t.SeasonNumber, t.EpisodeNumber)));
+            return existingMap;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error checking AreEpisodesAvailable for series {SeriesId}", seriesId);
-            return false;
+            _logger.LogError(ex, "Error reading the local episodes of series {SeriesId}", seriesId);
+            return null;
         }
     }
 }

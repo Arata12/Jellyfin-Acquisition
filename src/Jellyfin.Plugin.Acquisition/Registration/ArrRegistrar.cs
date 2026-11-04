@@ -244,15 +244,15 @@ public sealed class ArrRegistrar
     private RegistrationResult MapFailure(Exception ex, string service, AcquisitionRequest request)
     {
         _logger.LogWarning(ex, "Could not register request {Id} ({Title}) in {Service}", request.Id, request.Title, service);
-        var message = Security.SecurityHelper.RedactSecrets(ex.Message);
+        var message = Messages.FriendlyErrors.FromException(ex, service);
 
         // 4xx means Arr rejected the data (validation): retrying unchanged will not help
         if (ex is HttpRequestException { StatusCode: { } status } && (int)status >= 400 && (int)status < 500
             && status is not (HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.RequestTimeout or (HttpStatusCode)429))
         {
-            return RegistrationResult.Attention($"{service} rechazó el alta: {message}");
+            return RegistrationResult.Attention($"{service} rechazó el alta del título. {message}");
         }
 
-        return RegistrationResult.Transient($"{service} no está disponible: {message}");
+        return RegistrationResult.Transient(message);
     }
 }

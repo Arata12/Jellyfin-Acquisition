@@ -132,7 +132,7 @@ public class TrackingTests
 
         Assert.Equal(RequestStatus.RequiresAttention, req.Status);
         Assert.NotNull(req.AttentionReason);
-        Assert.Contains("queue association mismatch", req.AttentionReason);
+        Assert.Contains("asociada a otra serie en Sonarr", req.AttentionReason);
     }
 
     [Fact]

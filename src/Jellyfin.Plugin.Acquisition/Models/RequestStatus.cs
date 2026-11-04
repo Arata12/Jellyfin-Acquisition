@@ -11,5 +11,8 @@ public enum RequestStatus
     Importing,
     Available,
     RequiresAttention,
-    Failed
+    Failed,
+
+    /// <summary>Download unit the user (or the 14-day limit) dropped; the request no longer waits for it.</summary>
+    Skipped
 }

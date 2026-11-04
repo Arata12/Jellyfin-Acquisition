@@ -68,6 +68,12 @@ public class AcquisitionRequest
     public Guid? LocalItemId { get; set; }
     public DateTimeOffset? NextAttemptUtc { get; set; }
 
+    /// <summary>Why the request is waiting instead of searching (e.g. a movie not yet released digitally); null otherwise.</summary>
+    public string? WaitingNote { get; set; }
+
+    /// <summary>When the current run of empty searches of a request without download units started (search backoff).</summary>
+    public DateTimeOffset? FirstEmptySearchUtc { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ImportingStartedAt { get; set; }
@@ -87,7 +93,7 @@ public class AcquisitionRequest
             ?? Units.FirstOrDefault(u => u.Status == RequestStatus.Downloading)
             ?? Units.FirstOrDefault(u => u.Status == RequestStatus.Searching)
             ?? Units.FirstOrDefault(u => u.Status == RequestStatus.Pending)
-            ?? Units.FirstOrDefault(u => u.Status != RequestStatus.Available);
+            ?? Units.FirstOrDefault(u => u.Status is not (RequestStatus.Available or RequestStatus.Skipped));
     }
 
     /// <summary>

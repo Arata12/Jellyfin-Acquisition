@@ -115,14 +115,8 @@ public class ProwlarrClient : IProwlarrClient
             using var resp = await _httpClient.SendAsync(req, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
-                var reason = resp.StatusCode switch
-                {
-                    (HttpStatusCode)429 => "Prowlarr rate limit reached (HTTP 429).",
-                    HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => $"Prowlarr rejected the API key (HTTP {(int)resp.StatusCode}).",
-                    _ => $"Prowlarr search returned HTTP {(int)resp.StatusCode}."
-                };
-                _logger.LogWarning("Prowlarr search failed for {Query}: {Reason}", query.Query, reason);
-                throw new ProwlarrUnavailableException(reason);
+                _logger.LogWarning("Prowlarr search failed for {Query}: HTTP {Status}", query.Query, (int)resp.StatusCode);
+                throw new ProwlarrUnavailableException(Messages.FriendlyErrors.FromStatus(resp.StatusCode, "Prowlarr"));
             }
 
             return await resp.Content.ReadFromJsonAsync<List<ProwlarrRelease>>(cancellationToken: ct).ConfigureAwait(false) ?? [];
@@ -138,7 +132,7 @@ public class ProwlarrClient : IProwlarrClient
         catch (Exception ex)
         {
             LogFailure(ex, "Prowlarr Search failed for query {Query}", query.Query);
-            throw new ProwlarrUnavailableException("Prowlarr could not be reached: " + Security.SecurityHelper.RedactSecrets(ex.Message), ex);
+            throw new ProwlarrUnavailableException(Messages.FriendlyErrors.FromException(ex, "Prowlarr"), ex);
         }
     }
 
@@ -164,7 +158,7 @@ public class ProwlarrClient : IProwlarrClient
     {
         if (string.IsNullOrWhiteSpace(downloadUrl))
         {
-            return new TorrentDownloadResult { ErrorMessage = "Empty download URL" };
+            return new TorrentDownloadResult { ErrorMessage = "La release no tiene enlace de descarga." };
         }
 
         if (downloadUrl.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase))
@@ -214,7 +208,7 @@ public class ProwlarrClient : IProwlarrClient
                     var location = response.Headers.Location?.ToString();
                     if (string.IsNullOrEmpty(location))
                     {
-                        return new TorrentDownloadResult { ErrorMessage = "Redirect without location header" };
+                        return new TorrentDownloadResult { ErrorMessage = "El indexador respondió con una redirección inválida. Se reintentará en unos minutos." };
                     }
 
                     if (location.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase))
@@ -231,12 +225,19 @@ public class ProwlarrClient : IProwlarrClient
                 {
                     var retryAfterSeconds = response.Headers.RetryAfter?.Delta?.TotalSeconds;
                     _logger.LogWarning("Prowlarr returned 429 Too Many Requests (RetryAfter: {Secs}s)", retryAfterSeconds);
-                    return new TorrentDownloadResult { ErrorMessage = $"Rate limit exceeded (429). Retry after {retryAfterSeconds}s" };
+                    return new TorrentDownloadResult { ErrorMessage = Messages.FriendlyErrors.TorrentDownload((HttpStatusCode)429, retryAfterSeconds) };
                 }
 
                 if (response.StatusCode == HttpStatusCode.Gone)
                 {
-                    return new TorrentDownloadResult { ErrorMessage = "Torrent is no longer available (410 Gone)" };
+                    _logger.LogWarning("Indexer answered 410 Gone for {Url}", Security.SecurityHelper.RedactSecrets(currentUrl));
+                    return new TorrentDownloadResult { ErrorMessage = Messages.FriendlyErrors.TorrentDownload(HttpStatusCode.Gone), IsGone = true };
+                }
+
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    _logger.LogWarning("Indexer answered 404 Not Found for {Url}", Security.SecurityHelper.RedactSecrets(currentUrl));
+                    return new TorrentDownloadResult { ErrorMessage = Messages.FriendlyErrors.TorrentDownload(HttpStatusCode.NotFound), IsGone = true };
                 }
 
                 response.EnsureSuccessStatusCode();
@@ -244,7 +245,7 @@ public class ProwlarrClient : IProwlarrClient
                 var bytes = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
                 if (bytes.Length == 0)
                 {
-                    return new TorrentDownloadResult { ErrorMessage = "Downloaded torrent file is empty" };
+                    return new TorrentDownloadResult { ErrorMessage = "El indexador entregó un archivo torrent vacío. Se reintentará en unos minutos." };
                 }
 
                 // Check if body is magnet text
@@ -263,11 +264,16 @@ public class ProwlarrClient : IProwlarrClient
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed downloading torrent at hop {Hop} from {Url}", hop, Security.SecurityHelper.RedactSecrets(currentUrl));
-                return new TorrentDownloadResult { ErrorMessage = Security.SecurityHelper.RedactSecrets(ex.Message) };
+                return new TorrentDownloadResult
+                {
+                    ErrorMessage = ex is HttpRequestException { StatusCode: { } failed }
+                        ? Messages.FriendlyErrors.TorrentDownload(failed)
+                        : Messages.FriendlyErrors.FromException(ex, "el indexador")
+                };
             }
         }
 
-        return new TorrentDownloadResult { ErrorMessage = "Too many redirects fetching torrent" };
+        return new TorrentDownloadResult { ErrorMessage = "El indexador redirigió demasiadas veces al descargar el torrent. Se reintentará en unos minutos." };
     }
 
     private static TorrentDownloadResult ParseMagnet(string magnetUri)

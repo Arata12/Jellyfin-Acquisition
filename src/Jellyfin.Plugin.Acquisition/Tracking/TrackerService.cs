@@ -11,6 +11,7 @@ using Jellyfin.Plugin.Acquisition.Adapters.Sonarr.Models;
 using Jellyfin.Plugin.Acquisition.Catalog;
 using Jellyfin.Plugin.Acquisition.Adapters.Prowlarr.Models;
 using Jellyfin.Plugin.Acquisition.Models;
+using Jellyfin.Plugin.Acquisition.Messages;
 using Jellyfin.Plugin.Acquisition.Registration;
 using Jellyfin.Plugin.Acquisition.Releases;
 using Jellyfin.Plugin.Acquisition.Storage;
@@ -66,6 +67,15 @@ public class TrackerService : ITrackerService
 
     /// <summary>Time without any Arr import before the request needs attention.</summary>
     private static readonly TimeSpan ArrImportTimeout = TimeSpan.FromMinutes(60);
+
+    /// <summary>A download set aside for review is requeued automatically this long after it was parked.</summary>
+    private static readonly TimeSpan ParkedAutoRetry = TimeSpan.FromHours(24);
+
+    /// <summary>A download that stays parked this long since it first was is skipped automatically.</summary>
+    private static readonly TimeSpan ParkedMaxAge = TimeSpan.FromDays(14);
+
+    /// <summary>Reason shown for a download skipped after <see cref="ParkedMaxAge"/>.</summary>
+    public const string SkippedAfterMaxAgeReason = "No se encontró en 14 días; puedes volver a pedirlo más tarde.";
 
     private readonly SemaphoreSlim _pollLock = new(1, 1);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _requestLocks = new();
@@ -134,6 +144,7 @@ public class TrackerService : ITrackerService
                 (r.Status != RequestStatus.Available &&
                  r.Status != RequestStatus.Failed &&
                  r.Status != RequestStatus.RequiresAttention) ||
+                (r.Status == RequestStatus.RequiresAttention && r.Units.Any(u => u.Status == RequestStatus.RequiresAttention)) ||
                 (r.Status == RequestStatus.Available && r.FollowAiring && (!r.NextFollowCheckUtc.HasValue || r.NextFollowCheckUtc.Value <= now))).ToList();
 
             foreach (var req in activeRequests)
@@ -182,6 +193,8 @@ public class TrackerService : ITrackerService
 
             // Reload fresh request inside the lock (N03)
             var request = await _requestRepo.GetByIdAsync(initialRequest.Id, ct).ConfigureAwait(false) ?? initialRequest;
+
+            await ApplyParkedPoliciesAsync(request, ct).ConfigureAwait(false);
 
             switch (request.Status)
             {
@@ -251,17 +264,18 @@ public class TrackerService : ITrackerService
             }
 
             var now = DateTime.UtcNow;
+            var local = GetLocalEpisodes(request, allEpisodes);
 
             if (request.Scope.All)
             {
                 // Resolve All to explicit aired missing episodes (N01)
                 var searchCutoff = now - DownloadUnit.ReleaseGrace;
                 var missingAired = allEpisodes
-                    .Where(e => e.SeasonNumber > 0 && !e.HasFile && HasAired(e, allEpisodes, searchCutoff))
+                    .Where(e => e.SeasonNumber > 0 && !IsPresent(e, local) && HasAired(e, allEpisodes, searchCutoff))
                     .Select(e => ToTarget(request.ArrId.Value, e))
                     .ToList();
 
-                var airedWithFiles = allEpisodes.Count(e => e.SeasonNumber > 0 && e.HasFile && HasAired(e, allEpisodes, now));
+                var airedWithFiles = allEpisodes.Count(e => e.SeasonNumber > 0 && IsPresent(e, local) && HasAired(e, allEpisodes, now));
                 if (missingAired.Count == 0 && airedWithFiles == 0 && request.FollowAiring)
                 {
                     // Nothing has aired yet: wait for the first episodes instead of searching the whole series
@@ -299,7 +313,7 @@ public class TrackerService : ITrackerService
                 var selectedIds = request.Scope.EpisodeIds.ToHashSet();
                 var selectedSeasons = request.Scope.SeasonNumbers.ToHashSet();
                 request.Scope.TargetEpisodes = allEpisodes
-                    .Where(e => !e.HasFile && (selectedIds.Contains(e.Id) || selectedSeasons.Contains(e.SeasonNumber)))
+                    .Where(e => !IsPresent(e, local) && (selectedIds.Contains(e.Id) || selectedSeasons.Contains(e.SeasonNumber)))
                     .Select(e => ToTarget(request.ArrId.Value, e))
                     .ToList();
             }
@@ -412,6 +426,47 @@ public class TrackerService : ITrackerService
         AirDateUtc = e.AirDateUtc
     };
 
+    /// <summary>
+    /// Episodes of the series that exist in the Jellyfin library, for files copied there without Sonarr knowing.
+    /// Only looked up when Sonarr reports some episode without a file, and never fails the caller.
+    /// </summary>
+    private IReadOnlySet<(int Season, int Episode)> GetLocalEpisodes(AcquisitionRequest request, IReadOnlyList<SonarrEpisode> episodes)
+    {
+        if (request.Kind != MediaKind.Series || !episodes.Any(e => e.SeasonNumber > 0 && !e.HasFile))
+        {
+            return new HashSet<(int, int)>();
+        }
+
+        try
+        {
+            return _localMatcher.GetLocalEpisodes(request.UserId, request.Kind, request.Title, request.Year, request.ProviderIds)
+                ?? new HashSet<(int, int)>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not read the Jellyfin library episodes of request {Id}", request.Id);
+            return new HashSet<(int, int)>();
+        }
+    }
+
+    private static bool IsPresent(SonarrEpisode e, IReadOnlySet<(int Season, int Episode)> local) =>
+        e.HasFile || local.Contains((e.SeasonNumber, e.EpisodeNumber));
+
+    /// <summary>The request's target episodes, without those of downloads the user (or the 14-day limit) skipped.</summary>
+    private static List<EpisodeTarget> ActiveTargets(AcquisitionRequest request)
+    {
+        var skipped = request.Units.Where(u => u.Status == RequestStatus.Skipped).ToList();
+        if (skipped.Count == 0) return request.Scope.TargetEpisodes;
+
+        var skippedIds = skipped.SelectMany(u => u.EpisodeIds).ToHashSet();
+        var skippedNumbers = skipped.Where(u => u.EpisodeIds.Count == 0)
+            .SelectMany(u => u.EpisodeNumbers.Select(n => (u.SeasonNumber, n)))
+            .ToHashSet();
+        return request.Scope.TargetEpisodes
+            .Where(t => !skippedIds.Contains(t.EpisodeId) && !skippedNumbers.Contains((t.SeasonNumber, t.EpisodeNumber)))
+            .ToList();
+    }
+
     private async Task SaveIfRegisteredAsync(AcquisitionRequest request, bool hadArrId, CancellationToken ct)
     {
         // Keep a fresh registration even while waiting, so the next poll does not look it up again
@@ -500,16 +555,29 @@ public class TrackerService : ITrackerService
 
         // 1. Find releases if none selected
         var manual = config?.IsManualReleaseSelection() == true && !request.AutoReleaseSelection;
+        var hasStoredList = (activeUnit == null ? request.AvailableReleasesUnitId == null : request.AvailableReleasesUnitId == activeUnit.Id) &&
+                            IsReleaseListFresh(request) && request.AvailableReleases.Any(r => r.IsEligible);
+
+        // A movie that is not out digitally yet is not searched: it waits for its release date
+        if (request.Kind == MediaKind.Movie && (activeUnit?.SelectedRelease ?? request.SelectedRelease) == null && !(manual && hasStoredList))
+        {
+            if (await WaitForMovieReleaseAsync(request, ct).ConfigureAwait(false)) return;
+        }
+
         if (activeUnit != null && activeUnit.SelectedRelease == null)
         {
             // Manual mode: a recent list with eligible releases is already waiting for the user's choice
-            if (manual && request.AvailableReleasesUnitId == activeUnit.Id && IsReleaseListFresh(request) && request.AvailableReleases.Any(r => r.IsEligible))
+            if (manual && hasStoredList)
             {
                 return;
             }
 
-            var candidates = await SearchOrBackOffAsync(request, () => _releaseService.SearchAndEvaluateReleasesForUnitAsync(request, activeUnit, ct), ct).ConfigureAwait(false);
+            // Switched to automatic while a list was waiting: pick from it instead of searching again
+            var candidates = !manual && hasStoredList
+                ? request.AvailableReleases
+                : await SearchOrBackOffAsync(request, () => _releaseService.SearchAndEvaluateReleasesForUnitAsync(request, activeUnit, ct), ct).ConfigureAwait(false);
             if (candidates == null) return;
+            MarkUnavailableReleases(activeUnit, candidates);
 
             // Stored once on the request; per-unit copies only duplicated the persisted list
             activeUnit.AvailableReleases.Clear();
@@ -555,15 +623,17 @@ public class TrackerService : ITrackerService
                         activeUnit,
                         $"No se encontraron releases válidas tras {MaxEmptySearches} búsquedas.",
                         null,
-                        $"No se encontraron releases válidas para {unitDesc}.",
+                        $"No se encontraron releases válidas para {unitDesc}. Se volverá a intentar automáticamente.",
                         clearSelection: true,
                         ct).ConfigureAwait(false);
                     return;
                 }
 
-                request.NextAttemptUtc = DateTimeOffset.UtcNow.AddMinutes(5);
+                // Search less and less often so indexers (private trackers above all) are not hammered
+                var firstEmpty = activeUnit.FirstEmptySearchUtc ??= DateTimeOffset.UtcNow;
+                request.NextAttemptUtc = DateTimeOffset.UtcNow + SearchSchedule.EmptySearchDelay(DateTimeOffset.UtcNow - firstEmpty);
                 var lastMsg = request.History.LastOrDefault()?.Message;
-                var msg = $"No se encontraron releases candidatas válidas para {unitDesc}.";
+                var msg = $"No se encontraron releases válidas para {unitDesc}. Se seguirá buscando con pausas cada vez más largas.";
                 if (lastMsg != msg)
                 {
                     request.AddHistory(RequestStatus.Searching, msg);
@@ -573,6 +643,7 @@ public class TrackerService : ITrackerService
             }
 
             activeUnit.SearchAttempts = 0;
+            activeUnit.FirstEmptySearchUtc = null;
             if (manual)
             {
                 await WaitForUserSelectionAsync(request, activeUnit.Describe(request.Kind), ct).ConfigureAwait(false);
@@ -586,12 +657,14 @@ public class TrackerService : ITrackerService
         }
         else if (request.SelectedRelease == null && activeUnit == null)
         {
-            if (manual && request.AvailableReleasesUnitId == null && IsReleaseListFresh(request) && request.AvailableReleases.Any(r => r.IsEligible))
+            if (manual && hasStoredList)
             {
                 return;
             }
 
-            var candidates = await SearchOrBackOffAsync(request, () => _releaseService.SearchAndEvaluateReleasesAsync(request, ct), ct).ConfigureAwait(false);
+            var candidates = !manual && hasStoredList
+                ? request.AvailableReleases
+                : await SearchOrBackOffAsync(request, () => _releaseService.SearchAndEvaluateReleasesAsync(request, ct), ct).ConfigureAwait(false);
             if (candidates == null) return;
 
             request.AvailableReleases = candidates;
@@ -600,11 +673,13 @@ public class TrackerService : ITrackerService
             var best = _releaseService.PickBestRelease(candidates);
             if (best == null)
             {
-                request.NextAttemptUtc = DateTimeOffset.UtcNow.AddMinutes(5);
+                var firstEmpty = request.FirstEmptySearchUtc ??= DateTimeOffset.UtcNow;
+                request.NextAttemptUtc = DateTimeOffset.UtcNow + SearchSchedule.EmptySearchDelay(DateTimeOffset.UtcNow - firstEmpty);
                 await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
                 return;
             }
 
+            request.FirstEmptySearchUtc = null;
             if (manual)
             {
                 await WaitForUserSelectionAsync(request, request.Kind == MediaKind.Movie ? "la película" : "la serie", ct).ConfigureAwait(false);
@@ -620,14 +695,14 @@ public class TrackerService : ITrackerService
         if (selected == null) return;
 
         // Re-validate against fatal rejection reasons (N05)
-        if (!selected.IsTorrent || selected.RejectionReasons.Any(r => r.Contains("mismatch", StringComparison.OrdinalIgnoreCase)))
+        if (!selected.IsTorrent || selected.HasFatalMismatch)
         {
             await ParkUnitAsync(
                 request,
                 activeUnit,
-                "Release seleccionada contiene incompatibilidad de identidad o alcance.",
-                null,
-                "Selected release identity or scope mismatch",
+                "La release elegida no corresponde a lo pedido (otro título, año, temporada o episodio).",
+                selected.RejectionReasons.FirstOrDefault(),
+                "La release elegida no corresponde a lo pedido. Elige otra o usa «Reintentar» para buscar de nuevo.",
                 clearSelection: true,
                 ct).ConfigureAwait(false);
             return;
@@ -718,6 +793,22 @@ public class TrackerService : ITrackerService
 
         // 3. Fetch torrent bytes or magnet via Prowlarr
         var fetchResult = await _prowlarrClient.FetchTorrentAsync(selected.DownloadUrl ?? selected.MagnetUri ?? string.Empty, ct).ConfigureAwait(false);
+        if (!fetchResult.IsSuccess && fetchResult.IsGone && activeUnit != null)
+        {
+            // The indexer no longer has this torrent: remember it and search for another release right away
+            activeUnit.UnavailableReleases.Add(ReleaseKey(selected));
+            activeUnit.SelectedRelease = null;
+            activeUnit.FetchFailures = 0;
+            request.SelectedRelease = null;
+            request.AvailableReleases = [];
+            request.AvailableReleasesUnitId = null;
+            request.AvailableReleasesUpdatedAt = null;
+            request.NextAttemptUtc = null;
+            request.AddHistory(RequestStatus.Searching, $"{fetchResult.ErrorMessage} ({selected.Title})");
+            await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+            return;
+        }
+
         if (!fetchResult.IsSuccess)
         {
             // Transient indexer errors are retried with backoff; only repeated failures need the user
@@ -730,7 +821,7 @@ public class TrackerService : ITrackerService
             else
             {
                 if (activeUnit != null) activeUnit.FetchFailures = 0;
-                await ParkUnitAsync(request, activeUnit, "Error al descargar el torrent desde Prowlarr.", fetchResult.ErrorMessage, fetchResult.ErrorMessage, clearSelection: true, ct).ConfigureAwait(false);
+                await ParkUnitAsync(request, activeUnit, "No se pudo descargar el torrent desde Prowlarr.", fetchResult.ErrorMessage, fetchResult.ErrorMessage, clearSelection: true, ct).ConfigureAwait(false);
                 return;
             }
 
@@ -753,8 +844,8 @@ public class TrackerService : ITrackerService
         var added = await _qbClient.AddTorrentAsync(addOptions, ct).ConfigureAwait(false);
         if (!added)
         {
-            request.AddHistory(RequestStatus.RequiresAttention, "Fallo al enviar el torrent a qBittorrent.");
-            request.AttentionReason = "qBittorrent rejected or failed to add torrent";
+            request.AddHistory(RequestStatus.RequiresAttention, "qBittorrent no aceptó el torrent.");
+            request.AttentionReason = "qBittorrent no aceptó el torrent. Comprueba que esté en marcha y que la URL y las credenciales del plugin sean correctas; después usa «Reintentar».";
             await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
             return;
         }
@@ -768,6 +859,61 @@ public class TrackerService : ITrackerService
         }
         request.AddHistory(RequestStatus.Downloading, $"Torrent enviado a qBittorrent con categoría '{request.Category}' y etiqueta '{request.CorrelationTag}'.");
         await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A movie that is not out digitally (or physically) yet is not searched: the request waits and says until when.
+    /// Returns true when it is waiting. A Radarr failure never blocks the search.
+    /// </summary>
+    private async Task<bool> WaitForMovieReleaseAsync(AcquisitionRequest request, CancellationToken ct)
+    {
+        if (!request.ArrId.HasValue) return false;
+
+        RadarrMovie? movie;
+        try
+        {
+            movie = await _radarrClient.GetMovieByIdAsync(request.ArrId.Value, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not read the release dates of movie {ArrId} from Radarr", request.ArrId.Value);
+            return false;
+        }
+
+        var wait = movie == null ? null : SearchSchedule.ForMovie(movie, DateTimeOffset.UtcNow);
+        if (wait == null)
+        {
+            request.WaitingNote = null;
+            return false;
+        }
+
+        request.WaitingNote = wait.Note;
+        request.NextAttemptUtc = wait.RetryAt;
+        if (request.History.LastOrDefault()?.Message != wait.Note)
+        {
+            request.AddHistory(RequestStatus.Searching, wait.Note);
+        }
+
+        await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    private static string ReleaseKey(ReleaseCandidate release) =>
+        !string.IsNullOrEmpty(release.InfoHash)
+            ? "h:" + release.InfoHash.ToLowerInvariant()
+            : $"t:{release.Title}|{release.Indexer}".ToLowerInvariant();
+
+    /// <summary>Releases the indexer already said it no longer has are not eligible again.</summary>
+    private static void MarkUnavailableReleases(DownloadUnit unit, List<ReleaseCandidate> candidates)
+    {
+        if (unit.UnavailableReleases.Count == 0) return;
+
+        const string reason = "Ese torrent ya no existe en el indexador.";
+        foreach (var candidate in candidates.Where(c => unit.UnavailableReleases.Contains(ReleaseKey(c))))
+        {
+            candidate.IsEligible = false;
+            if (!candidate.RejectionReasons.Contains(reason)) candidate.RejectionReasons.Add(reason);
+        }
     }
 
     private async Task<List<ReleaseCandidate>?> SearchOrBackOffAsync(AcquisitionRequest request, Func<Task<List<ReleaseCandidate>>> search, CancellationToken ct)
@@ -817,7 +963,8 @@ public class TrackerService : ITrackerService
         }
         catch (Exception ex)
         {
-            return (null, $"No se pudieron leer los clientes de descarga de {service}: {Security.SecurityHelper.RedactSecrets(ex.Message)}");
+            _logger.LogWarning(ex, "Could not read the download clients of {Service}", service);
+            return (null, $"No se pudieron leer los clientes de descarga de {service}. {FriendlyErrors.FromException(ex, service)}");
         }
 
         var qbClients = clients.Where(c => c.IsEnabledQBittorrent).ToList();
@@ -881,9 +1028,10 @@ public class TrackerService : ITrackerService
         }
 
         var known = request.Units.SelectMany(u => u.EpisodeIds).Concat(request.Scope.TargetEpisodes.Select(t => t.EpisodeId)).ToHashSet();
+        var local = GetLocalEpisodes(request, episodes);
         var cutoff = now - DownloadUnit.ReleaseGrace;
         var newlyAired = episodes
-            .Where(e => e.SeasonNumber > 0 && !e.HasFile && !known.Contains(e.Id) && HasAired(e, episodes, cutoff))
+            .Where(e => e.SeasonNumber > 0 && !IsPresent(e, local) && !known.Contains(e.Id) && HasAired(e, episodes, cutoff))
             .OrderBy(e => e.SeasonNumber).ThenBy(e => e.EpisodeNumber)
             .ToList();
 
@@ -951,7 +1099,7 @@ public class TrackerService : ITrackerService
         var inUse = new HashSet<string>(StringComparer.Ordinal);
         foreach (var request in requests)
         {
-            var requestDone = request.Status == RequestStatus.Available && request.Units.All(u => u.Status == RequestStatus.Available);
+            var requestDone = request.Status == RequestStatus.Available && request.Units.All(u => u.Status is RequestStatus.Available or RequestStatus.Skipped);
             if (!requestDone)
             {
                 // Request-level tags (legacy root tag, last tag used) still matter unless they belong to an imported download
@@ -963,7 +1111,7 @@ public class TrackerService : ITrackerService
                 }
             }
 
-            foreach (var unit in request.Units.Where(u => u.Status != RequestStatus.Available && !string.IsNullOrEmpty(u.CorrelationTag)))
+            foreach (var unit in request.Units.Where(u => u.Status is not (RequestStatus.Available or RequestStatus.Skipped) && !string.IsNullOrEmpty(u.CorrelationTag)))
             {
                 inUse.Add(unit.CorrelationTag!);
             }
@@ -1001,6 +1149,8 @@ public class TrackerService : ITrackerService
         {
             unit.Status = RequestStatus.RequiresAttention;
             unit.ErrorMessage = reason;
+            unit.ParkedAtUtc = DateTimeOffset.UtcNow;
+            unit.FirstParkedUtc ??= unit.ParkedAtUtc;
             if (clearSelection) unit.SelectedRelease = null;
         }
 
@@ -1033,7 +1183,7 @@ public class TrackerService : ITrackerService
         request.AttentionReason = string.Join("; ", parked.Select(u => $"{u.Describe(request.Kind)}: {u.ErrorMessage}"));
         request.AddHistory(
             RequestStatus.RequiresAttention,
-            $"{parked.Count} de {request.Units.Count} descargas requieren atención; el resto ha terminado. Usa «Reintentar» para volver a intentarlas.");
+            $"{parked.Count} de {request.Units.Count} descargas requieren atención; el resto ha terminado. Se volverán a intentar solas cada 24 horas; también puedes usar «Reintentar» u «Omitir».");
         await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
     }
 
@@ -1083,14 +1233,16 @@ public class TrackerService : ITrackerService
                 {
                     var msg = queueItem.StatusMessages.FirstOrDefault()?.Messages?.FirstOrDefault()
                         ?? queueItem.ErrorMessage
-                        ?? "Arr import blocked";
-                    await ParkUnitAsync(request, activeUnit, "Descarga detenida o con advertencia en Sonarr.", msg, msg, clearSelection: false, ct).ConfigureAwait(false);
+                        ?? "importación bloqueada";
+                    _logger.LogWarning("Sonarr queue reports a problem for request {Id}: {Message}", request.Id, msg);
+                    await ParkUnitAsync(request, activeUnit, "Descarga detenida o con advertencia en Sonarr.", msg,
+                        $"Sonarr no puede importar la descarga: «{msg}». Revisa su cola de actividad y usa «Reintentar».", clearSelection: false, ct).ConfigureAwait(false);
                     return true;
                 }
 
                 if (request.ArrId.HasValue && queueItem.SeriesId.HasValue && queueItem.SeriesId.Value != 0 && queueItem.SeriesId.Value != request.ArrId.Value)
                 {
-                    await ParkUnitAsync(request, activeUnit, "La descarga fue asociada a una serie diferente en Sonarr.", $"Series ID inesperado: {queueItem.SeriesId}", "Arr queue association mismatch", clearSelection: false, ct).ConfigureAwait(false);
+                    await ParkUnitAsync(request, activeUnit, "La descarga fue asociada a una serie diferente en Sonarr.", $"Series ID inesperado: {queueItem.SeriesId}", "La descarga quedó asociada a otra serie en Sonarr. Revisa su cola de actividad y usa «Reintentar».", clearSelection: false, ct).ConfigureAwait(false);
                     return true;
                 }
             }
@@ -1123,14 +1275,16 @@ public class TrackerService : ITrackerService
                 {
                     var msg = queueItem.StatusMessages.FirstOrDefault()?.Messages?.FirstOrDefault()
                         ?? queueItem.ErrorMessage
-                        ?? "Arr import blocked";
-                    await ParkUnitAsync(request, activeUnit, "Descarga detenida o con advertencia en Radarr.", msg, msg, clearSelection: false, ct).ConfigureAwait(false);
+                        ?? "importación bloqueada";
+                    _logger.LogWarning("Radarr queue reports a problem for request {Id}: {Message}", request.Id, msg);
+                    await ParkUnitAsync(request, activeUnit, "Descarga detenida o con advertencia en Radarr.", msg,
+                        $"Radarr no puede importar la descarga: «{msg}». Revisa su cola de actividad y usa «Reintentar».", clearSelection: false, ct).ConfigureAwait(false);
                     return true;
                 }
 
                 if (request.ArrId.HasValue && queueItem.MovieId.HasValue && queueItem.MovieId.Value != 0 && queueItem.MovieId.Value != request.ArrId.Value)
                 {
-                    await ParkUnitAsync(request, activeUnit, "La descarga fue asociada a una película diferente en Radarr.", $"Movie ID inesperado: {queueItem.MovieId}", "Arr queue association mismatch", clearSelection: false, ct).ConfigureAwait(false);
+                    await ParkUnitAsync(request, activeUnit, "La descarga fue asociada a una película diferente en Radarr.", $"Movie ID inesperado: {queueItem.MovieId}", "La descarga quedó asociada a otra película en Radarr. Revisa su cola de actividad y usa «Reintentar».", clearSelection: false, ct).ConfigureAwait(false);
                     return true;
                 }
             }
@@ -1299,6 +1453,7 @@ public class TrackerService : ITrackerService
             }
 
             var epMap = episodes.ToDictionary(e => e.Id);
+            var targets = ActiveTargets(request);
 
             if (activeUnit != null && activeUnit.EpisodeIds.Count > 0)
             {
@@ -1306,7 +1461,9 @@ public class TrackerService : ITrackerService
             }
             else if (request.Scope.TargetEpisodes.Count > 0)
             {
-                isUnitImportedInArr = request.Scope.TargetEpisodes.All(t => epMap.TryGetValue(t.EpisodeId, out var ep) && ep.HasFile);
+                // Episodes copied to the library without Sonarr count as present too
+                var local = GetLocalEpisodes(request, episodes);
+                isUnitImportedInArr = targets.All(t => epMap.TryGetValue(t.EpisodeId, out var ep) && IsPresent(ep, local));
             }
             else if (request.Scope.EpisodeNumbers.Count > 0)
             {
@@ -1375,7 +1532,7 @@ public class TrackerService : ITrackerService
         var episodesAvailable = true;
         if (request.Kind == MediaKind.Series && localMatch.HasValue)
         {
-            episodesAvailable = _localMatcher.AreEpisodesAvailable(request.UserId, localMatch.Value, request.Scope.TargetEpisodes);
+            episodesAvailable = _localMatcher.AreEpisodesAvailable(request.UserId, localMatch.Value, ActiveTargets(request));
         }
 
         if (!localMatch.HasValue || !episodesAvailable)
@@ -1388,7 +1545,7 @@ public class TrackerService : ITrackerService
             else if (DateTimeOffset.UtcNow - request.ImportingStartedAt.Value > TimeSpan.FromMinutes(15))
             {
                 request.AddHistory(RequestStatus.RequiresAttention, "Archivos importados por Arr, pero no detectados por Jellyfin tras 15 minutos.");
-                request.AttentionReason = "Media files imported by Arr but not detected in Jellyfin library. Please verify library paths.";
+                request.AttentionReason = "Arr importó los archivos, pero Jellyfin no los detecta. Comprueba que las rutas de la biblioteca coincidan con las de Arr y escanea la biblioteca.";
                 await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
                 return;
             }
@@ -1587,13 +1744,17 @@ public class TrackerService : ITrackerService
                 return new AddScopeResult(AddScopeOutcome.Invalid, request, "Solo se pueden añadir episodios a una solicitud de serie en curso.");
             }
 
-            if (request.Scope.All && request.FollowAiring)
+            var seasons = seasonNumbers.Where(n => n >= 0).ToHashSet();
+            var ids = episodeIds.ToHashSet();
+
+            // A followed series already covers everything, except what the user skipped and now asks for again
+            var asksForSkipped = request.Units.Any(u => u.Status == RequestStatus.Skipped &&
+                (all || seasons.Contains(u.SeasonNumber) || u.EpisodeIds.Any(ids.Contains)));
+            if (request.Scope.All && request.FollowAiring && !asksForSkipped)
             {
                 return new AddScopeResult(AddScopeOutcome.AlreadyCovered, request, "La serie completa ya está solicitada.");
             }
 
-            var seasons = seasonNumbers.Where(n => n >= 0).ToHashSet();
-            var ids = episodeIds.ToHashSet();
             if (!all && seasons.Count == 0 && ids.Count == 0)
             {
                 return new AddScopeResult(AddScopeOutcome.Invalid, request, "Elige al menos una temporada o un episodio.");
@@ -1616,9 +1777,13 @@ public class TrackerService : ITrackerService
 
             var now = DateTime.UtcNow;
             var cutoff = now - DownloadUnit.ReleaseGrace;
-            var known = request.Units.SelectMany(u => u.EpisodeIds).Concat(request.Scope.TargetEpisodes.Select(t => t.EpisodeId)).ToHashSet();
+            // Episodes the user skipped are not "already requested": they can be picked again
+            var skippedIds = request.Units.Where(u => u.Status == RequestStatus.Skipped).SelectMany(u => u.EpisodeIds).ToHashSet();
+            var known = request.Units.Where(u => u.Status != RequestStatus.Skipped).SelectMany(u => u.EpisodeIds)
+                .Concat(request.Scope.TargetEpisodes.Select(t => t.EpisodeId).Where(id => !skippedIds.Contains(id))).ToHashSet();
+            var local = GetLocalEpisodes(request, episodes);
             var wanted = episodes
-                .Where(e => !e.HasFile && !known.Contains(e.Id) &&
+                .Where(e => !IsPresent(e, local) && !known.Contains(e.Id) &&
                             (all ? e.SeasonNumber > 0 && HasAired(e, episodes, cutoff) : seasons.Contains(e.SeasonNumber) || ids.Contains(e.Id)))
                 .OrderBy(e => e.SeasonNumber).ThenBy(e => e.EpisodeNumber)
                 .ToList();
@@ -1637,6 +1802,20 @@ public class TrackerService : ITrackerService
                 return new AddScopeResult(AddScopeOutcome.Added, request);
             }
 
+            // Picked again after being skipped: they leave the skipped downloads and become new ones
+            var wantedIds = wanted.Select(e => e.Id).ToHashSet();
+            foreach (var skippedUnit in request.Units.Where(u => u.Status == RequestStatus.Skipped && u.EpisodeIds.Any(wantedIds.Contains)).ToList())
+            {
+                foreach (var e in wanted.Where(e => skippedUnit.EpisodeIds.Contains(e.Id)))
+                {
+                    skippedUnit.EpisodeIds.Remove(e.Id);
+                    skippedUnit.EpisodeNumbers.Remove(e.EpisodeNumber);
+                }
+
+                if (skippedUnit.EpisodeIds.Count == 0) request.Units.Remove(skippedUnit);
+            }
+
+            request.Scope.TargetEpisodes.RemoveAll(t => wantedIds.Contains(t.EpisodeId));
             var targets = wanted.Select(e => ToTarget(request.ArrId.Value, e)).ToList();
             request.Scope.TargetEpisodes.AddRange(targets);
             var added = DescribeAddition(targets, season => all || seasons.Contains(season));
@@ -1714,7 +1893,7 @@ public class TrackerService : ITrackerService
             var requestStopped = request.Status is RequestStatus.RequiresAttention or RequestStatus.Failed;
             if (!requestStopped && parked.Count == 0)
             {
-                return new RetryResult(RetryOutcome.InvalidStatus, request, "Only requests requiring attention or failed can be retried.");
+                return new RetryResult(RetryOutcome.InvalidStatus, request, "Solo se pueden reintentar las solicitudes que requieren atención o han fallado.");
             }
 
             // Every download set aside goes back to the queue, not just the first one
@@ -1726,6 +1905,9 @@ public class TrackerService : ITrackerService
                 unit.SearchAttempts = 0;
                 unit.ImportWaitStartedAt = null;
                 unit.ManualImportRequestedAt = null;
+                unit.FirstEmptySearchUtc = null;
+                unit.ParkedAtUtc = null;
+                unit.FirstParkedUtc = null;
             }
 
             if (!requestStopped)
@@ -1743,6 +1925,196 @@ public class TrackerService : ITrackerService
 
             request.AddHistory(RequestStatus.Pending, "Reintento de solicitud solicitado manualmente.");
             await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+            return new RetryResult(RetryOutcome.Success, request);
+        }
+    }
+
+    /// <summary>
+    /// Downloads set aside get two automatic outs so they do not keep a request in "Requiere atención" forever: they are
+    /// requeued once every 24 hours, and skipped for good after 14 days parked. Requeued ones keep the one-at-a-time order.
+    /// </summary>
+    private async Task ApplyParkedPoliciesAsync(AcquisitionRequest request, CancellationToken ct)
+    {
+        var parked = request.Units.Where(u => u.Status == RequestStatus.RequiresAttention).ToList();
+        if (parked.Count == 0) return;
+
+        var now = DateTimeOffset.UtcNow;
+        var changed = false;
+        var requeued = new List<DownloadUnit>();
+        var skipped = new List<DownloadUnit>();
+        foreach (var unit in parked)
+        {
+            if (!unit.ParkedAtUtc.HasValue)
+            {
+                // Parked before this version: the clock starts when it is first seen
+                unit.ParkedAtUtc = now;
+                unit.FirstParkedUtc ??= now;
+                changed = true;
+                continue;
+            }
+
+            unit.FirstParkedUtc ??= unit.ParkedAtUtc;
+            if (now - unit.FirstParkedUtc.Value >= ParkedMaxAge)
+            {
+                unit.Status = RequestStatus.Skipped;
+                unit.ErrorMessage = SkippedAfterMaxAgeReason;
+                skipped.Add(unit);
+            }
+            else if (now - unit.ParkedAtUtc.Value >= ParkedAutoRetry)
+            {
+                RequeueUnit(unit, resetParkedClock: false);
+                requeued.Add(unit);
+            }
+        }
+
+        if (requeued.Count == 0 && skipped.Count == 0)
+        {
+            if (changed) await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (skipped.Count > 0)
+        {
+            request.AddHistory(request.Status, $"{string.Join(", ", skipped.Select(u => u.Describe(request.Kind)))} omitido: {SkippedAfterMaxAgeReason}");
+        }
+
+        if (requeued.Count > 0)
+        {
+            request.AddHistory(request.Status, $"Se vuelve a intentar automáticamente: {string.Join(", ", requeued.Select(u => u.Describe(request.Kind)))}.");
+        }
+
+        ReconcileAfterParkedChange(request);
+        await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+    }
+
+    private static void RequeueUnit(DownloadUnit unit, bool resetParkedClock)
+    {
+        unit.Status = RequestStatus.Pending;
+        unit.ErrorMessage = null;
+        unit.FetchFailures = 0;
+        unit.SearchAttempts = 0;
+        unit.FirstEmptySearchUtc = null;
+        unit.ImportWaitStartedAt = null;
+        unit.ManualImportRequestedAt = null;
+        if (resetParkedClock)
+        {
+            unit.ParkedAtUtc = null;
+            unit.FirstParkedUtc = null;
+        }
+    }
+
+    /// <summary>
+    /// Puts the request in the state its downloads imply after some were requeued or skipped: back to searching when
+    /// there is work, checking availability when everything else is done, closed when nothing is left to wait for.
+    /// </summary>
+    private static void ReconcileAfterParkedChange(AcquisitionRequest request)
+    {
+        var workable = request.Units.Any(u => u.Status is not (RequestStatus.Available or RequestStatus.Skipped or RequestStatus.RequiresAttention or RequestStatus.Failed));
+        var stillParked = request.Units.Any(u => u.Status is RequestStatus.RequiresAttention or RequestStatus.Failed);
+        if (workable)
+        {
+            if (request.Status == RequestStatus.RequiresAttention)
+            {
+                request.AttentionReason = null;
+                request.ErrorMessage = null;
+                request.NextAttemptUtc = null;
+                request.AddHistory(RequestStatus.Searching, "Se reanuda la búsqueda con las descargas pendientes.");
+            }
+
+            return;
+        }
+
+        if (stillParked)
+        {
+            request.AttentionReason = string.Join("; ", request.Units
+                .Where(u => u.Status is RequestStatus.RequiresAttention or RequestStatus.Failed)
+                .Select(u => $"{u.Describe(request.Kind)}: {u.ErrorMessage}"));
+            return;
+        }
+
+        request.AttentionReason = null;
+        request.ErrorMessage = null;
+        request.NextAttemptUtc = null;
+        if (request.Units.Any(u => u.Status == RequestStatus.Available))
+        {
+            // The rest is done: confirm it is in the library and the request becomes available
+            request.ImportingStartedAt = null;
+            request.AddHistory(RequestStatus.Importing, "Solo quedaban descargas omitidas. Verificando que el resto esté disponible en Jellyfin.");
+        }
+        else if (request.FollowAiring)
+        {
+            request.NextFollowCheckUtc = null;
+            request.AddHistory(RequestStatus.Available, "Se omitieron todas las descargas; se seguirá la emisión para los episodios nuevos.");
+        }
+        else
+        {
+            request.AddHistory(RequestStatus.Failed, "Se omitieron todas las descargas, así que no queda nada por esperar. Puedes volver a pedirlo.");
+        }
+    }
+
+    public async Task<RetryResult> SkipParkedAsync(string requestId, Func<AcquisitionRequest, bool> canManage, CancellationToken ct = default)
+    {
+        using (await AcquireLockAsync(requestId, ct).ConfigureAwait(false))
+        {
+            var request = await _requestRepo.GetByIdAsync(requestId, ct).ConfigureAwait(false);
+            if (request == null)
+            {
+                return new RetryResult(RetryOutcome.NotFound, null);
+            }
+
+            if (!canManage(request))
+            {
+                return new RetryResult(RetryOutcome.Forbidden, request);
+            }
+
+            var parked = request.Units.Where(u => u.Status is RequestStatus.RequiresAttention or RequestStatus.Failed).ToList();
+            if (parked.Count == 0)
+            {
+                return new RetryResult(RetryOutcome.InvalidStatus, request, "No hay descargas apartadas que omitir.");
+            }
+
+            foreach (var unit in parked)
+            {
+                unit.Status = RequestStatus.Skipped;
+            }
+
+            request.AddHistory(request.Status, $"Se omiten {parked.Count} descargas apartadas: {string.Join(", ", parked.Select(u => u.Describe(request.Kind)))}. Puedes volver a pedirlas cuando quieras.");
+            ReconcileAfterParkedChange(request);
+            await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+            return new RetryResult(RetryOutcome.Success, request);
+        }
+    }
+
+    public async Task<RetryResult> SetAutoSelectAsync(string requestId, bool enabled, Func<AcquisitionRequest, bool> canManage, CancellationToken ct = default)
+    {
+        using (await AcquireLockAsync(requestId, ct).ConfigureAwait(false))
+        {
+            var request = await _requestRepo.GetByIdAsync(requestId, ct).ConfigureAwait(false);
+            if (request == null)
+            {
+                return new RetryResult(RetryOutcome.NotFound, null);
+            }
+
+            if (!canManage(request))
+            {
+                return new RetryResult(RetryOutcome.Forbidden, request);
+            }
+
+            if (!request.IsActive)
+            {
+                return new RetryResult(RetryOutcome.InvalidStatus, request, "La solicitud ya terminó; no hay nada que elegir.");
+            }
+
+            if (request.AutoReleaseSelection != enabled)
+            {
+                request.AutoReleaseSelection = enabled;
+                request.NextAttemptUtc = null; // a list waiting for the user's choice is picked on the next poll
+                request.AddHistory(request.Status, enabled
+                    ? "Selección automática activada: se elegirá la mejor release de lo que falta."
+                    : "Selección automática desactivada: podrás elegir las releases que falten.");
+                await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+            }
+
             return new RetryResult(RetryOutcome.Success, request);
         }
     }

@@ -69,7 +69,7 @@ public class SonarrClient : ISonarrClient
                 {
                     // Without an API key a 401 means "not configured yet", not "credentials rejected"
                     Status = hasApiKey ? Jellyfin.Plugin.Acquisition.Models.ProviderStatus.Unauthorized : Jellyfin.Plugin.Acquisition.Models.ProviderStatus.NotConfigured,
-                    ErrorMessage = hasApiKey ? $"Sonarr authentication failed (HTTP {(int)resp.StatusCode}: invalid API key)." : $"Sonarr API key is not configured or invalid (HTTP {(int)resp.StatusCode})."
+                    ErrorMessage = hasApiKey ? Messages.FriendlyErrors.FromStatus(resp.StatusCode, "Sonarr") : "Falta la clave de API de Sonarr o no es válida. Configúrala en el plugin."
                 };
             }
 
@@ -78,7 +78,7 @@ public class SonarrClient : ISonarrClient
                 return new SonarrLookupResult
                 {
                     Status = Jellyfin.Plugin.Acquisition.Models.ProviderStatus.RateLimited,
-                    ErrorMessage = "Sonarr rate limit reached (HTTP 429)."
+                    ErrorMessage = Messages.FriendlyErrors.FromStatus(resp.StatusCode, "Sonarr")
                 };
             }
 
@@ -88,7 +88,7 @@ public class SonarrClient : ISonarrClient
                 return new SonarrLookupResult
                 {
                     Status = hasApiKey ? Jellyfin.Plugin.Acquisition.Models.ProviderStatus.Unavailable : Jellyfin.Plugin.Acquisition.Models.ProviderStatus.NotConfigured,
-                    ErrorMessage = $"Sonarr returned HTTP {resp.StatusCode}."
+                    ErrorMessage = Messages.FriendlyErrors.FromStatus(resp.StatusCode, "Sonarr")
                 };
             }
 
@@ -109,7 +109,7 @@ public class SonarrClient : ISonarrClient
             return new SonarrLookupResult
             {
                 Status = hasApiKey ? Jellyfin.Plugin.Acquisition.Models.ProviderStatus.Unavailable : Jellyfin.Plugin.Acquisition.Models.ProviderStatus.NotConfigured,
-                ErrorMessage = ex.Message
+                ErrorMessage = Messages.FriendlyErrors.FromException(ex, "Sonarr")
             };
         }
     }
