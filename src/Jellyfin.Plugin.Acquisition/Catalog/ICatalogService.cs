@@ -6,7 +6,7 @@ namespace Jellyfin.Plugin.Acquisition.Catalog;
 public interface ICatalogService
 {
     Task<List<CatalogItemDto>> SearchCatalogAsync(Guid userId, string query, CancellationToken ct = default);
-    /// <param name="includeLocal">Keep titles already in the library (the web search leaves them out).</param>
+    /// <param name="includeLocal">Keep movies already in the library (the web search leaves them out; series always stay so more seasons can be requested).</param>
     Task<CatalogSearchResultDto> SearchCatalogWithDiagnosticsAsync(Guid userId, string query, CancellationToken ct = default, bool includeLocal = false);
     void InvalidateSearchCache(string? query = null);
     /// <summary>

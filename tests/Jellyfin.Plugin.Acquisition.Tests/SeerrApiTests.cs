@@ -326,7 +326,7 @@ public class SeerrApiTests : IDisposable
     }
 
     [Fact]
-    public async Task Search_KeepsLibraryTitlesMarkedAvailable_WebSearchStillHidesThem()
+    public async Task Search_KeepsLibraryTitlesMarkedAvailable_WebSearchKeepsSeriesFlaggedAsLocal()
     {
         var sonarr = new Mock<ISonarrClient>();
         sonarr.Setup(s => s.LookupSeriesWithDiagnosticsAsync("breaking bad", It.IsAny<CancellationToken>()))
@@ -348,7 +348,8 @@ public class SeerrApiTests : IDisposable
         Assert.Equal("tv", item.MediaType);
         Assert.Equal("2008", item.FirstAirDate);
         Assert.Equal(SeerrMediaStatus.Available, item.MediaInfo!.Status);
-        Assert.Empty((await catalog.SearchCatalogWithDiagnosticsAsync(Guid.NewGuid(), "breaking bad")).Items);
+        // The web search keeps library series (flagged) so more seasons can be requested
+        Assert.True(Assert.Single((await catalog.SearchCatalogWithDiagnosticsAsync(Guid.NewGuid(), "breaking bad")).Items).IsLocal);
     }
 
     [Fact]

@@ -88,8 +88,22 @@ public class RadarrMovie
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? OriginalTitle { get; set; }
 
+    [JsonPropertyName("originalLanguage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RadarrLanguage? OriginalLanguage { get; set; }
+
+    [JsonPropertyName("alternateTitles")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<RadarrAlternateTitle>? AlternateTitles { get; set; }
+
     [JsonPropertyName("addOptions")]
     public RadarrAddOptions? AddOptions { get; set; }
+}
+
+public class RadarrAlternateTitle
+{
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
 }
 
 public class RadarrStatusMessage

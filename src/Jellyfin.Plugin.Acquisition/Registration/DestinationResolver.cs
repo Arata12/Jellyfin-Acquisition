@@ -159,6 +159,53 @@ public static class DestinationResolver
         return string.Equals(a.Trim().TrimEnd('/', '\\'), b.Trim().TrimEnd('/', '\\'), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Free bytes reported by Sonarr/Radarr for each root folder; empty when the instance cannot be read (informative only).
+    /// </summary>
+    public static async Task<List<(string? Path, long? FreeSpace)>> ListFreeSpaceAsync(
+        MediaKind kind,
+        ISonarrClient sonarrClient,
+        IRadarrClient? radarrClient,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (kind == MediaKind.Series)
+            {
+                return (await sonarrClient.GetRootFoldersAsync(ct).ConfigureAwait(false) ?? []).Select(r => (r.Path, r.FreeSpace)).ToList();
+            }
+
+            return radarrClient == null
+                ? []
+                : (await radarrClient.GetRootFoldersAsync(ct).ConfigureAwait(false) ?? []).Select(r => (r.Path, r.FreeSpace)).ToList();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Free space of the root folder that holds <paramref name="path"/>: the exact root, or the longest root that contains it.
+    /// </summary>
+    public static long? FindFreeSpace(string? path, IEnumerable<(string? Path, long? FreeSpace)> roots)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        var target = path.Trim().TrimEnd('/', '\\');
+
+        return roots
+            .Where(r => !string.IsNullOrWhiteSpace(r.Path) && r.FreeSpace.HasValue)
+            .Select(r => (Root: r.Path!.Trim().TrimEnd('/', '\\'), r.FreeSpace))
+            .Where(r => target == r.Root || target.StartsWith(r.Root + "/", StringComparison.Ordinal) || target.StartsWith(r.Root + "\\", StringComparison.Ordinal))
+            .OrderByDescending(r => r.Root.Length)
+            .Select(r => r.FreeSpace)
+            .FirstOrDefault();
+    }
+
     private static string FolderName(string path)
     {
         var name = Path.GetFileName(path.TrimEnd('/', '\\'));

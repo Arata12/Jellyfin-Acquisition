@@ -339,8 +339,10 @@ public class PlanTests
     {
         var userId = Guid.NewGuid();
         var mockUserManager = new Mock<IUserManager>();
-        mockUserManager.Setup(u => u.GetUserById(userId))
-            .Returns(new Jellyfin.Database.Implementations.Entities.User("user", "user", "user"));
+        // Server paths are only returned to administrators
+        var adminUser = new Jellyfin.Database.Implementations.Entities.User("user", "user", "user");
+        adminUser.Permissions.Add(new Jellyfin.Database.Implementations.Entities.Permission(Jellyfin.Database.Implementations.Enums.PermissionKind.IsAdministrator, true));
+        mockUserManager.Setup(u => u.GetUserById(userId)).Returns(adminUser);
 
         // Setup PluginConfiguration with multiple destinations
         var mockAppPaths = new Mock<IApplicationPaths>();

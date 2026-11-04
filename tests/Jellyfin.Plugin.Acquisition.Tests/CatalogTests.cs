@@ -64,10 +64,11 @@ public class CatalogTests
         // Act
         var results = await service.SearchCatalogAsync(userId, "how i met");
 
-        // Assert - Father is omitted from external results to avoid duplicating local results (R11)
-        Assert.Single(results);
+        // Assert - Father stays (series in the library can still get more seasons) but is flagged as local
+        Assert.Equal(2, results.Count);
+        Assert.True(results.Single(r => r.Title == "How I Met Your Father").IsLocal);
 
-        var mother = results[0];
+        var mother = results.Single(r => r.Title == "How I Met Your Mother");
         Assert.Equal("How I Met Your Mother", mother.Title);
         Assert.False(mother.IsLocal);
         Assert.Null(mother.LocalItemId);

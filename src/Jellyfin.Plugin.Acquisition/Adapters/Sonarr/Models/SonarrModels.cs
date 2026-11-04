@@ -92,8 +92,45 @@ public class SonarrSeries
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<SonarrAlternateTitle>? AlternateTitles { get; set; }
 
+    [JsonPropertyName("network")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Network { get; set; }
+
+    [JsonPropertyName("genres")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Genres { get; set; }
+
+    [JsonPropertyName("runtime")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Runtime { get; set; }
+
+    [JsonPropertyName("originalLanguage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SonarrLanguage? OriginalLanguage { get; set; }
+
+    /// <summary>Episode counters; only meaningful for series Sonarr already manages (Id &gt; 0).</summary>
+    [JsonPropertyName("statistics")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SonarrSeriesStatistics? Statistics { get; set; }
+
     [JsonPropertyName("addOptions")]
     public SonarrAddOptions? AddOptions { get; set; }
+}
+
+public class SonarrSeriesStatistics
+{
+    [JsonPropertyName("seasonCount")]
+    public int SeasonCount { get; set; }
+
+    /// <summary>Aired (monitored) episodes.</summary>
+    [JsonPropertyName("episodeCount")]
+    public int EpisodeCount { get; set; }
+
+    [JsonPropertyName("episodeFileCount")]
+    public int EpisodeFileCount { get; set; }
+
+    [JsonPropertyName("totalEpisodeCount")]
+    public int TotalEpisodeCount { get; set; }
 }
 
 public class SonarrAlternateTitle

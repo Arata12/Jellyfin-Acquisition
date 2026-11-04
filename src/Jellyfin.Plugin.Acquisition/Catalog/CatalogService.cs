@@ -83,7 +83,7 @@ public class CatalogService : ICatalogService
     {
         var searchResult = new CatalogSearchResultDto();
 
-        if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 3)
+        if (string.IsNullOrWhiteSpace(query))
         {
             return searchResult;
         }
@@ -225,25 +225,7 @@ public class CatalogService : ICatalogService
         {
             foreach (var series in sonarrDiag.Items)
             {
-                var posterUrl = series.Images.FirstOrDefault(i => string.Equals(i.CoverType, "poster", StringComparison.OrdinalIgnoreCase))?.RemoteUrl
-                                ?? series.Images.FirstOrDefault()?.RemoteUrl;
-                var opaqueId = RegisterImage(posterUrl);
-
-                rawResults.Add(new CatalogItemDto
-                {
-                    Id = $"series-{series.TvdbId}",
-                    Kind = MediaKind.Series,
-                    Title = series.Title,
-                    Year = series.Year,
-                    Overview = series.Overview,
-                    PosterUrl = opaqueId != null ? $"/Acquisition/images/{opaqueId}" : null,
-                    ProviderIds = new ProviderIds
-                    {
-                        Tvdb = series.TvdbId.ToString(),
-                        Tmdb = series.TmdbId > 0 ? series.TmdbId.ToString() : null,
-                        Imdb = series.ImdbId
-                    }
-                });
+                rawResults.Add(MapSeries(series));
             }
         }
 
@@ -252,24 +234,7 @@ public class CatalogService : ICatalogService
         {
             foreach (var movie in radarrDiag.Items)
             {
-                var posterUrl = movie.Images.FirstOrDefault(i => string.Equals(i.CoverType, "poster", StringComparison.OrdinalIgnoreCase))?.RemoteUrl
-                                ?? movie.Images.FirstOrDefault()?.RemoteUrl;
-                var opaqueId = RegisterImage(posterUrl);
-
-                rawResults.Add(new CatalogItemDto
-                {
-                    Id = $"movie-{movie.TmdbId}",
-                    Kind = MediaKind.Movie,
-                    Title = movie.Title,
-                    Year = movie.Year,
-                    Overview = movie.Overview,
-                    PosterUrl = opaqueId != null ? $"/Acquisition/images/{opaqueId}" : null,
-                    ProviderIds = new ProviderIds
-                    {
-                        Tmdb = movie.TmdbId.ToString(),
-                        Imdb = movie.ImdbId
-                    }
-                });
+                rawResults.Add(MapMovie(movie));
             }
         }
 
@@ -281,6 +246,8 @@ public class CatalogService : ICatalogService
         {
             searchResult.IsPartial = true;
         }
+
+        rawResults = CatalogRanking.Rank(rawResults, query);
 
         var enriched = await EnrichItemsWithLocalAndRequestStatusAsync(userId, rawResults, filterOutLocal: !includeLocal, ct).ConfigureAwait(false);
         searchResult.Items = enriched;
@@ -351,21 +318,136 @@ public class CatalogService : ICatalogService
         return searchResult;
     }
 
+    private CatalogItemDto MapSeries(SonarrSeries series)
+    {
+        var posterUrl = series.Images.FirstOrDefault(i => string.Equals(i.CoverType, "poster", StringComparison.OrdinalIgnoreCase))?.RemoteUrl
+                        ?? series.Images.FirstOrDefault()?.RemoteUrl;
+        var opaqueId = RegisterImage(posterUrl);
+        var genres = (series.Genres ?? []).Where(g => !string.IsNullOrWhiteSpace(g)).ToList();
+        var language = series.OriginalLanguage?.Name;
+        var seasons = series.Seasons.Count(s => s.SeasonNumber > 0);
+
+        var item = new CatalogItemDto
+        {
+            Id = $"series-{series.TvdbId}",
+            Kind = MediaKind.Series,
+            Title = series.Title,
+            Year = series.Year,
+            Overview = series.Overview,
+            PosterUrl = opaqueId != null ? $"/Acquisition/images/{opaqueId}" : null,
+            ProviderIds = new ProviderIds
+            {
+                Tvdb = series.TvdbId.ToString(),
+                Tmdb = series.TmdbId > 0 ? series.TmdbId.ToString() : null,
+                Imdb = series.ImdbId
+            },
+            Network = NullIfBlank(series.Network),
+            OriginalLanguage = NullIfBlank(language),
+            SeasonCount = seasons > 0 ? seasons : null,
+            SeriesStatus = NormalizeSeriesStatus(series.Status),
+            Genres = genres,
+            RuntimeMinutes = series.Runtime > 0 ? series.Runtime : null,
+            IsAnime = IsAnime(genres, language),
+            AlternateTitles = (series.AlternateTitles ?? []).Select(t => t.Title ?? string.Empty).Where(t => t.Length > 0).ToList()
+        };
+
+        if (series.Id > 0 && series.Statistics is { } stats)
+        {
+            if (stats.EpisodeCount > 0) item.EpisodeCount = stats.EpisodeCount;
+            var missing = stats.EpisodeCount - stats.EpisodeFileCount;
+            if (missing > 0) item.MissingEpisodes = missing;
+        }
+
+        item.ExternalLinks = BuildLinks(item);
+        return item;
+    }
+
+    private CatalogItemDto MapMovie(RadarrMovie movie)
+    {
+        var posterUrl = movie.Images.FirstOrDefault(i => string.Equals(i.CoverType, "poster", StringComparison.OrdinalIgnoreCase))?.RemoteUrl
+                        ?? movie.Images.FirstOrDefault()?.RemoteUrl;
+        var opaqueId = RegisterImage(posterUrl);
+        var genres = (movie.Genres ?? []).Where(g => !string.IsNullOrWhiteSpace(g)).ToList();
+        var language = movie.OriginalLanguage?.Name;
+
+        var item = new CatalogItemDto
+        {
+            Id = $"movie-{movie.TmdbId}",
+            Kind = MediaKind.Movie,
+            Title = movie.Title,
+            Year = movie.Year,
+            Overview = movie.Overview,
+            PosterUrl = opaqueId != null ? $"/Acquisition/images/{opaqueId}" : null,
+            ProviderIds = new ProviderIds
+            {
+                Tmdb = movie.TmdbId.ToString(),
+                Imdb = movie.ImdbId
+            },
+            Studio = NullIfBlank(movie.Studio),
+            OriginalLanguage = NullIfBlank(language),
+            Genres = genres,
+            RuntimeMinutes = movie.Runtime > 0 ? movie.Runtime : null,
+            IsAnime = IsAnime(genres, language),
+            AlternateTitles = (movie.AlternateTitles ?? []).Select(t => t.Title ?? string.Empty).Where(t => t.Length > 0).ToList()
+        };
+
+        var original = NullIfBlank(movie.OriginalTitle);
+        if (original != null && !string.Equals(original, movie.Title, StringComparison.OrdinalIgnoreCase))
+        {
+            item.OriginalTitle = original;
+            item.AlternateTitles.Add(original);
+        }
+
+        item.ExternalLinks = BuildLinks(item);
+        return item;
+    }
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizeSeriesStatus(string? status)
+    {
+        var value = status?.Trim().ToLowerInvariant();
+        return value is "continuing" or "ended" or "upcoming" ? value : null;
+    }
+
+    /// <summary>Anime = "Anime" genre, or "Animation" with Japanese as the original language.</summary>
+    public static bool IsAnime(IReadOnlyCollection<string> genres, string? originalLanguage)
+    {
+        bool Has(string genre) => genres.Any(g => string.Equals(g, genre, StringComparison.OrdinalIgnoreCase));
+        return Has("Anime") ||
+               (Has("Animation") && string.Equals(originalLanguage, "Japanese", StringComparison.OrdinalIgnoreCase));
+    }
+
+    internal static List<ExternalLinkDto> BuildLinks(CatalogItemDto item)
+    {
+        var links = new List<ExternalLinkDto>();
+        var ids = item.ProviderIds;
+        var isSeries = item.Kind == MediaKind.Series;
+
+        if (int.TryParse(ids.Tmdb, out var tmdb) && tmdb > 0)
+        {
+            links.Add(new ExternalLinkDto { Name = "TMDB", Url = $"https://www.themoviedb.org/{(isSeries ? "tv" : "movie")}/{tmdb}" });
+        }
+
+        if (isSeries && int.TryParse(ids.Tvdb, out var tvdb) && tvdb > 0)
+        {
+            links.Add(new ExternalLinkDto { Name = "TVDB", Url = $"https://thetvdb.com/?tab=series&id={tvdb}" });
+        }
+
+        if (!string.IsNullOrWhiteSpace(ids.Imdb) && ids.Imdb.StartsWith("tt", StringComparison.OrdinalIgnoreCase) && ids.Imdb.All(char.IsLetterOrDigit))
+        {
+            links.Add(new ExternalLinkDto { Name = "IMDb", Url = $"https://www.imdb.com/title/{ids.Imdb}/" });
+        }
+
+        return links;
+    }
+
     private async Task<List<CatalogItemDto>> EnrichItemsWithLocalAndRequestStatusAsync(Guid userId, List<CatalogItemDto> source, bool filterOutLocal, CancellationToken ct)
     {
         var activeRequests = await _requestRepo.GetAllAsync(ct).ConfigureAwait(false) ?? [];
 
         // Clone items for user enrichment
-        var copies = source.Select(item => new CatalogItemDto
-        {
-            Id = item.Id,
-            Kind = item.Kind,
-            Title = item.Title,
-            Year = item.Year,
-            Overview = item.Overview,
-            PosterUrl = item.PosterUrl,
-            ProviderIds = item.ProviderIds
-        }).ToList();
+        var copies = source.Select(item => item.Clone()).ToList();
 
         // Batch match with local library (R15)
         _localMatcher.MatchBatch(userId, copies);
@@ -373,8 +455,8 @@ public class CatalogService : ICatalogService
         var enriched = new List<CatalogItemDto>();
         foreach (var copy in copies)
         {
-            // Omit items already in library from external search results (R11)
-            if (filterOutLocal && copy.IsLocal)
+            // Movies already in the library stay out of the external results (R11); series remain so more seasons can be requested
+            if (filterOutLocal && copy.IsLocal && copy.Kind == MediaKind.Movie)
             {
                 continue;
             }
@@ -465,24 +547,7 @@ public class CatalogService : ICatalogService
             var series = seriesList.FirstOrDefault();
             if (series != null)
             {
-                var posterUrl = series.Images.FirstOrDefault(i => string.Equals(i.CoverType, "poster", StringComparison.OrdinalIgnoreCase))?.RemoteUrl;
-                var opaqueId = RegisterImage(posterUrl);
-
-                var item = new CatalogItemDto
-                {
-                    Id = $"series-{series.TvdbId}",
-                    Kind = MediaKind.Series,
-                    Title = series.Title,
-                    Year = series.Year,
-                    Overview = series.Overview,
-                    PosterUrl = opaqueId != null ? $"/Acquisition/images/{opaqueId}" : null,
-                    ProviderIds = new ProviderIds
-                    {
-                        Tvdb = series.TvdbId.ToString(),
-                        Tmdb = series.TmdbId > 0 ? series.TmdbId.ToString() : null,
-                        Imdb = series.ImdbId
-                    }
-                };
+                var item = MapSeries(series);
 
                 var enriched = await EnrichItemsWithLocalAndRequestStatusAsync(userId, [item], filterOutLocal: false, ct).ConfigureAwait(false);
                 return enriched.FirstOrDefault() ?? item;
@@ -494,23 +559,7 @@ public class CatalogService : ICatalogService
             var movie = movieList.FirstOrDefault();
             if (movie != null)
             {
-                var posterUrl = movie.Images.FirstOrDefault(i => string.Equals(i.CoverType, "poster", StringComparison.OrdinalIgnoreCase))?.RemoteUrl;
-                var opaqueId = RegisterImage(posterUrl);
-
-                var item = new CatalogItemDto
-                {
-                    Id = $"movie-{movie.TmdbId}",
-                    Kind = MediaKind.Movie,
-                    Title = movie.Title,
-                    Year = movie.Year,
-                    Overview = movie.Overview,
-                    PosterUrl = opaqueId != null ? $"/Acquisition/images/{opaqueId}" : null,
-                    ProviderIds = new ProviderIds
-                    {
-                        Tmdb = movie.TmdbId.ToString(),
-                        Imdb = movie.ImdbId
-                    }
-                };
+                var item = MapMovie(movie);
 
                 var enriched = await EnrichItemsWithLocalAndRequestStatusAsync(userId, [item], filterOutLocal: false, ct).ConfigureAwait(false);
                 return enriched.FirstOrDefault() ?? item;
