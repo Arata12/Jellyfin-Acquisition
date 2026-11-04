@@ -92,7 +92,22 @@
             localItemId: item.localItemId ?? item.LocalItemId ?? null,
             requestId: item.requestId ?? item.RequestId ?? null,
             requestStatus: statusName(item.requestStatus !== undefined ? item.requestStatus : item.RequestStatus),
-            statusText: item.statusText ?? item.StatusText ?? null
+            statusText: item.statusText ?? item.StatusText ?? null,
+            originalTitle: item.originalTitle ?? item.OriginalTitle ?? null,
+            network: item.network ?? item.Network ?? null,
+            studio: item.studio ?? item.Studio ?? null,
+            originalLanguage: item.originalLanguage ?? item.OriginalLanguage ?? null,
+            seasonCount: item.seasonCount ?? item.SeasonCount ?? null,
+            episodeCount: item.episodeCount ?? item.EpisodeCount ?? null,
+            seriesStatus: item.seriesStatus ?? item.SeriesStatus ?? null,
+            genres: item.genres ?? item.Genres ?? [],
+            runtimeMinutes: item.runtimeMinutes ?? item.RuntimeMinutes ?? null,
+            externalLinks: (item.externalLinks ?? item.ExternalLinks ?? []).map(l => ({
+                name: l.name ?? l.Name ?? '',
+                url: l.url ?? l.Url ?? ''
+            })),
+            missingEpisodes: item.missingEpisodes ?? item.MissingEpisodes ?? null,
+            isAnime: Boolean(item.isAnime ?? item.IsAnime)
         };
     }
 
@@ -150,6 +165,14 @@
             }
         });
 
+        document.addEventListener('keydown', (e) => {
+            const target = e.target;
+            if (e.key === 'Enter' && target && (target.type === 'search' || target.classList.contains('searchFields') || target.id?.toLowerCase().includes('search'))) {
+                activeSearchInput = target;
+                onSearchNow(target.value);
+            }
+        });
+
         window.addEventListener('hashchange', () => {
             lastQuery = '';
             if (currentAbortController) {
@@ -200,11 +223,22 @@
         }
     }
 
+    // Short titles ("Up", "It") search automatically from 2 characters; Enter searches at once even with 1
+    const MIN_AUTO_SEARCH_LENGTH = 2;
+
+    function onSearchNow(val) {
+        clearTimeout(debounceTimer);
+        const query = (val || '').trim();
+        if (query.length > 0) {
+            performExternalSearch(query);
+        }
+    }
+
     function onSearchInput(val) {
         clearTimeout(debounceTimer);
         const query = (val || '').trim();
 
-        if (query.length < 3) {
+        if (query.length < MIN_AUTO_SEARCH_LENGTH) {
             if (currentAbortController) {
                 currentAbortController.abort();
                 currentAbortController = null;
@@ -385,10 +419,20 @@
         const kindLabel = item.kind === 'Movie' ? 'Película' : 'Serie';
         const yearLabel = item.year ? `(${item.year})` : '';
 
+        // An active request badge wins over the "in library" one
+        const hasRequest = item.requestStatus !== null && item.requestStatus !== undefined;
+        const isLocalSeries = item.isLocal && item.kind === 'Series';
         let badgeHtml = '';
-        if (item.requestStatus !== null && item.requestStatus !== undefined) {
+        if (hasRequest) {
             const label = STATUS_LABELS[item.requestStatus] || item.statusText || 'Solicitado';
             badgeHtml = `<span class="acquisition-badge status-${escapeHtml(String(item.requestStatus))}">${escapeHtml(label)}</span>`;
+        } else if (isLocalSeries) {
+            badgeHtml = '<span class="acquisition-badge status-InLibrary">En biblioteca</span>';
+        }
+
+        let metaText = `${kindLabel} ${yearLabel}`.trim();
+        if (isLocalSeries && !hasRequest && item.missingEpisodes > 0) {
+            metaText += item.missingEpisodes === 1 ? ' · Falta 1 episodio' : ` · Faltan ${item.missingEpisodes} episodios`;
         }
 
         card.innerHTML = `
@@ -398,13 +442,24 @@
             </div>
             <div class="acquisition-card-content">
                 <div class="acquisition-card-title">${escapeHtml(item.title)}</div>
-                <div class="acquisition-card-meta">${kindLabel} ${yearLabel}</div>
+                <div class="acquisition-card-meta">${escapeHtml(metaText)}</div>
             </div>
         `;
 
         bindPosterFallback(card);
         card.addEventListener('click', () => {
-            openDetailsModal(item);
+            if (isLocalSeries && !hasRequest) {
+                // Same flow as the button on the series detail page
+                openLocalSeriesRequest({
+                    title: item.title,
+                    year: item.year,
+                    tvdb: item.providerIds.tvdb,
+                    tmdb: item.providerIds.tmdb,
+                    imdb: item.providerIds.imdb
+                });
+            } else {
+                openDetailsModal(item);
+            }
         });
 
         return card;
@@ -464,6 +519,40 @@
             list('seasonNumbers', 'SeasonNumbers').length === 0;
     }
 
+    const SERIES_STATUS_LABELS = { continuing: 'En emisión', ended: 'Finalizada', upcoming: 'Próximamente' };
+    const LOW_SPACE_BYTES = 20 * 1024 * 1024 * 1024;
+
+    function formatBytes(bytes) {
+        const gb = bytes / (1024 * 1024 * 1024);
+        if (gb >= 1024) return `${(gb / 1024).toFixed(1)} TB`;
+        return `${Math.max(0, Math.round(gb))} GB`;
+    }
+
+    // Compact facts under the title that tell apart works sharing a name, plus links to the provider pages
+    function detailsHtml(item) {
+        const facts = [];
+        if (item.originalTitle) facts.push(`Título original: ${item.originalTitle}`);
+        if (item.network) facts.push(item.network);
+        if (item.studio) facts.push(item.studio);
+        if (item.originalLanguage) facts.push(item.originalLanguage);
+        if (item.seasonCount > 0) facts.push(item.seasonCount === 1 ? '1 temporada' : `${item.seasonCount} temporadas`);
+        if (item.episodeCount > 0) facts.push(item.episodeCount === 1 ? '1 episodio' : `${item.episodeCount} episodios`);
+        if (item.seriesStatus && SERIES_STATUS_LABELS[item.seriesStatus]) facts.push(SERIES_STATUS_LABELS[item.seriesStatus]);
+        if (item.runtimeMinutes > 0) facts.push(`${item.runtimeMinutes} min`);
+        if (Array.isArray(item.genres) && item.genres.length > 0) facts.push(item.genres.slice(0, 4).join(', '));
+
+        const links = (item.externalLinks || []).filter(l => l.name && /^https:\/\//.test(l.url || ''));
+        let html = '';
+        if (facts.length > 0) {
+            html += `<div class="acquisition-modal-facts">${facts.map(escapeHtml).join(' · ')}</div>`;
+        }
+        if (links.length > 0) {
+            html += `<div class="acquisition-modal-links">${links.map(l =>
+                `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.name)}</a>`).join(' · ')}</div>`;
+        }
+        return html;
+    }
+
     async function openDetailsModal(rawItem) {
         const item = normalizeCatalogItem(rawItem);
         const modal = document.createElement('div');
@@ -485,11 +574,14 @@
                     <div class="acquisition-modal-main">
                         <h2 class="acquisition-modal-title">${escapeHtml(item.title)} <span class="year">${yearLabel}</span></h2>
                         <div class="acquisition-modal-meta">${kindLabel}</div>
+                        ${detailsHtml(item)}
                         <p class="acquisition-modal-overview">${escapeHtml(item.overview || 'Sin descripción disponible.')}</p>
 
                         <div id="acquisition-destination-area" class="acquisition-destination-area" style="display: none; margin-bottom: 16px;">
                             <label for="acquisition-destination-select" class="acquisition-field-label">Destino</label>
                             <select id="acquisition-destination-select" class="acquisition-select"></select>
+                            <p id="acquisition-destination-hint" class="acquisition-field-hint" style="display: none;">Sugerido: parece anime</p>
+                            <p id="acquisition-free-space" class="acquisition-field-hint" style="display: none;"></p>
                         </div>
                         <p id="acquisition-request-error" class="acquisition-error" style="display: none;"></p>
 
@@ -587,18 +679,56 @@
                     btnAdd.disabled = true;
                     showError(optError);
                 } else if (destinations.length > 0) {
+                    const destId = d => d.id ?? d.Id ?? '';
+                    const isAnimeDest = d => String(d.seriesType ?? d.SeriesType ?? '').toLowerCase() === 'anime';
+                    let selectedId = defaultId;
+                    let suggestedAnimeId = null;
+                    if (item.kind === 'Series') {
+                        const animeDests = destinations.filter(isAnimeDest);
+                        if (item.isAnime && animeDests.length > 0) {
+                            const preferred = animeDests.find(d => destId(d) === defaultId) || animeDests[0];
+                            selectedId = suggestedAnimeId = destId(preferred);
+                        } else if (!item.isAnime) {
+                            // Never default a non-anime series into an anime destination
+                            const def = destinations.find(d => destId(d) === defaultId);
+                            if (def && isAnimeDest(def)) {
+                                const others = destinations.filter(d => !isAnimeDest(d));
+                                selectedId = others.length === 1 ? destId(others[0]) : null;
+                            }
+                        }
+                    }
+
                     // Without a single option or an explicit default the user must choose; nothing is picked silently
-                    const placeholder = defaultId ? '' : '<option value="" selected disabled>Elige un destino…</option>';
+                    const placeholder = selectedId ? '' : '<option value="" selected disabled>Elige un destino…</option>';
                     destSelect.innerHTML = placeholder + destinations.map(d => {
-                        const id = d.id ?? d.Id ?? '';
+                        const id = destId(d);
                         const name = d.name ?? d.Name ?? '';
                         const seriesType = d.seriesType ?? d.SeriesType ?? '';
                         const rootFolderPath = d.rootFolderPath ?? d.RootFolderPath ?? '';
                         const typeSuffix = seriesType ? ` (${escapeHtml(seriesType)})` : '';
                         const pathSuffix = rootFolderPath ? ` - ${escapeHtml(rootFolderPath)}` : '';
-                        const selected = defaultId && id === defaultId ? ' selected' : '';
+                        const selected = selectedId && id === selectedId ? ' selected' : '';
                         return `<option value="${escapeHtml(id)}"${selected}>${escapeHtml(name)}${typeSuffix}${pathSuffix}</option>`;
                     }).join('');
+
+                    const freeById = {};
+                    destinations.forEach(d => { freeById[destId(d)] = d.freeSpaceBytes ?? d.FreeSpaceBytes ?? null; });
+                    const hintEl = modal.querySelector('#acquisition-destination-hint');
+                    const freeEl = modal.querySelector('#acquisition-free-space');
+                    const refreshDestinationInfo = () => {
+                        hintEl.style.display = suggestedAnimeId && destSelect.value === suggestedAnimeId ? 'block' : 'none';
+                        const free = freeById[destSelect.value];
+                        if (typeof free === 'number' && free >= 0) {
+                            const low = free < LOW_SPACE_BYTES;
+                            freeEl.textContent = `Espacio libre: ${formatBytes(free)}` + (low ? '. Queda poco espacio en el servidor; avisa al administrador.' : '');
+                            freeEl.classList.toggle('low-space', low);
+                            freeEl.style.display = 'block';
+                        } else {
+                            freeEl.style.display = 'none';
+                        }
+                    };
+                    destSelect.addEventListener('change', refreshDestinationInfo);
+                    refreshDestinationInfo();
                     destArea.style.display = 'block';
                 }
             } else {
@@ -1313,30 +1443,43 @@
 
         btn.addEventListener('click', async () => {
             const ids = item.ProviderIds || {};
-            const params = new URLSearchParams();
-            params.set('title', item.Name || '');
-            if (item.ProductionYear) params.set('year', String(item.ProductionYear));
-            if (ids.Tvdb || ids.tvdb) params.set('tvdb', ids.Tvdb || ids.tvdb);
-            if (ids.Tmdb || ids.tmdb) params.set('tmdb', ids.Tmdb || ids.tmdb);
-            if (ids.Imdb || ids.imdb) params.set('imdb', ids.Imdb || ids.imdb);
-
             btn.disabled = true;
             try {
-                // The server maps the local series to Sonarr's entry by TVDB, TMDB or IMDb (TVDB is often missing in Jellyfin)
-                const resp = await fetch(`${getApiBase()}/Acquisition/catalog/local-series?${params.toString()}`, { headers: getAuthHeaders() });
-                if (resp.ok) {
-                    openDetailsModal(await resp.json());
-                } else {
-                    window.alert(await readErrorMessage(resp, 'No se pudo encontrar esta serie en Sonarr.'));
-                }
-            } catch (err) {
-                console.warn('[Acquisition] Error resolving local series:', err);
-                window.alert('Error de conexión al buscar la serie en Sonarr.');
+                await openLocalSeriesRequest({
+                    title: item.Name || '',
+                    year: item.ProductionYear,
+                    tvdb: ids.Tvdb || ids.tvdb,
+                    tmdb: ids.Tmdb || ids.tmdb,
+                    imdb: ids.Imdb || ids.imdb
+                });
             } finally {
                 btn.disabled = false;
             }
         });
 
+    }
+
+    // Maps a series from the Jellyfin library to its Sonarr entry (by TVDB, TMDB or IMDb) and opens the request modal
+    async function openLocalSeriesRequest(local) {
+        const params = new URLSearchParams();
+        params.set('title', local.title || '');
+        if (local.year) params.set('year', String(local.year));
+        if (local.tvdb) params.set('tvdb', local.tvdb);
+        if (local.tmdb) params.set('tmdb', local.tmdb);
+        if (local.imdb) params.set('imdb', local.imdb);
+
+        try {
+            // The server maps the local series to Sonarr's entry by TVDB, TMDB or IMDb (TVDB is often missing in Jellyfin)
+            const resp = await fetch(`${getApiBase()}/Acquisition/catalog/local-series?${params.toString()}`, { headers: getAuthHeaders() });
+            if (resp.ok) {
+                openDetailsModal(await resp.json());
+            } else {
+                window.alert(await readErrorMessage(resp, 'No se pudo encontrar esta serie en Sonarr.'));
+            }
+        } catch (err) {
+            console.warn('[Acquisition] Error resolving local series:', err);
+            window.alert('Error de conexión al buscar la serie en Sonarr.');
+        }
     }
 
     function escapeHtml(value) {

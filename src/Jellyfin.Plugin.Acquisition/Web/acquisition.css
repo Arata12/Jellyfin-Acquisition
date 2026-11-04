@@ -205,6 +205,7 @@
 .acquisition-badge.status-Available { background: #107c10; } /* Available */
 .acquisition-badge.status-RequiresAttention { background: #d83b01; } /* RequiresAttention */
 .acquisition-badge.status-Failed { background: #e81123; } /* Failed */
+.acquisition-badge.status-InLibrary { background: #107c10; } /* Series already in the Jellyfin library */
 
 .acq-theme-abyss .acquisition-badge {
     -webkit-backdrop-filter: blur(var(--acq-blur));
@@ -397,6 +398,38 @@
     font-size: 0.85em;
     color: var(--acq-text-secondary);
     margin-bottom: 12px;
+}
+
+.acquisition-modal-facts {
+    font-size: 0.85em;
+    line-height: 1.4;
+    color: var(--acq-text-secondary);
+    margin: -6px 0 6px 0;
+}
+
+.acquisition-modal-links {
+    font-size: 0.8em;
+    margin: 0 0 12px 0;
+}
+
+.acquisition-modal-links a {
+    color: rgb(var(--acq-accent));
+    text-decoration: none;
+}
+
+.acquisition-modal-links a:hover {
+    text-decoration: underline;
+}
+
+.acquisition-field-hint {
+    margin: 6px 0 0 0;
+    font-size: 0.8em;
+    color: var(--acq-text-secondary);
+}
+
+.acquisition-field-hint.low-space {
+    color: #ff9800;
+    font-weight: 600;
 }
 
 .acquisition-modal-overview {

@@ -929,6 +929,11 @@ public class AcquisitionController : ControllerBase
 
         // Requesters only receive the authorized destinations; quality profiles are an integration detail
         var list = await DestinationResolver.ListAsync(kind, config, _sonarrClient, _radarrClient, ct).ConfigureAwait(false);
+        var freeSpace = list.Options.Count > 0
+            ? await DestinationResolver.ListFreeSpaceAsync(kind, _sonarrClient, _radarrClient, ct).ConfigureAwait(false)
+            : [];
+        // Server paths are only for administrators
+        var isAdmin = SecurityHelper.IsAdmin(userId.Value, _userManager);
         var result = new RequestOptionsDto
         {
             Kind = kind,
@@ -937,10 +942,11 @@ public class AcquisitionController : ControllerBase
             {
                 Id = o.Id,
                 Name = o.Name,
-                RootFolderPath = o.RootFolderPath,
+                RootFolderPath = isAdmin ? o.RootFolderPath : string.Empty,
                 QualityProfileId = o.QualityProfileId,
                 SeriesType = o.SeriesType,
-                IsDefault = o.IsDefault
+                IsDefault = o.IsDefault,
+                FreeSpaceBytes = DestinationResolver.FindFreeSpace(o.RootFolderPath, freeSpace)
             }).ToList()
         };
 

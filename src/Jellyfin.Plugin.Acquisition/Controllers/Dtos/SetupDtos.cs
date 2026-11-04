@@ -73,6 +73,10 @@ public class RequestOptionDestinationDto
 
     [JsonPropertyName("isDefault")]
     public bool IsDefault { get; set; }
+
+    /// <summary>Free bytes of the destination's disk as reported by Sonarr/Radarr; null when unknown. Informative only.</summary>
+    [JsonPropertyName("freeSpaceBytes")]
+    public long? FreeSpaceBytes { get; set; }
 }
 
 public class RequestOptionsDto
