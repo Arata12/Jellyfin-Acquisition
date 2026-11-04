@@ -1294,17 +1294,20 @@
     }
 
     function injectRequestMissingButton(buttonsBar, item) {
-        // Same markup as Jellyfin's own detail buttons (round, icon only, tooltip), so it takes the active theme's look.
-        // Inserted as HTML so Jellyfin upgrades it to an emby-button like the native ones.
-        const html = '<button is="emby-button" type="button" id="btn-request-missing-episodes" class="button-flat btnAcquisitionRequest detailButton"' +
-            ' title="Solicitar episodios faltantes" aria-label="Solicitar episodios faltantes">' +
-            '<div class="detailButton-content"><span class="material-icons detailButton-icon playlist_add" aria-hidden="true"></span></div>' +
-            '</button>';
-        const moreButton = buttonsBar.querySelector('.btnMoreCommands');
-        if (moreButton) {
-            moreButton.insertAdjacentHTML('beforebegin', html);
+        // A labelled button under the title, not another round icon in the buttons bar: there it looked like Jellyfin's
+        // own "add to playlist" and on phones the bar overflows the screen and hid it
+        const html = '<div class="acquisition-detail-request ' + themeClassName('acquisition-detail-row') + '">' +
+            '<button type="button" id="btn-request-missing-episodes" class="acquisition-detail-btn" title="Pedir a la biblioteca los episodios o temporadas que faltan">' +
+            '<span class="material-icons download" aria-hidden="true"></span><span>Pedir episodios que faltan</span>' +
+            '</button></div>';
+        // Right above the overview, which keeps the text column on desktop and on phones (where the title block is collapsed)
+        const primary = buttonsBar.closest('.detailPagePrimaryContainer');
+        const overview = primary && primary.querySelector('.detailSection .overview');
+        const overviewSection = overview && overview.closest('.detailSection');
+        if (overviewSection) {
+            overviewSection.insertAdjacentHTML('afterbegin', html);
         } else {
-            buttonsBar.insertAdjacentHTML('beforeend', html);
+            buttonsBar.insertAdjacentHTML('afterend', html);
         }
         const btn = document.getElementById('btn-request-missing-episodes');
 

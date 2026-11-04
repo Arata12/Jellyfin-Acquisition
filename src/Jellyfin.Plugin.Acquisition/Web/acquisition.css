@@ -241,6 +241,43 @@
     opacity: 0.8;
 }
 
+/* "Pedir episodios que faltan" on a series page, under the title */
+.acquisition-detail-row {
+    margin: 4px 0 16px;
+}
+
+.acquisition-detail-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px 8px 12px;
+    font: inherit;
+    font-size: 0.95em;
+    color: var(--acq-text);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(var(--acq-accent), 0.35);
+    border-radius: 999px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.3s var(--acq-ease), border-color 0.3s var(--acq-ease);
+}
+
+.acquisition-detail-btn:hover,
+.acquisition-detail-btn:focus-visible {
+    background: rgba(var(--acq-accent), 0.18);
+    border-color: rgba(var(--acq-accent), 0.7);
+    outline: none;
+}
+
+.acquisition-detail-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.acquisition-detail-btn .material-icons {
+    font-size: 1.3em;
+}
+
 /* Modal Overlay */
 .acquisition-modal-overlay {
     position: fixed;
