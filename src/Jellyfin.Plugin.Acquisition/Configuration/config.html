@@ -157,6 +157,11 @@
                 </div>
 
                 <h2>Permisos</h2>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxActiveRequestsPerUser">Máximo de solicitudes en curso por usuario</label>
+                    <input is="emby-input" type="number" min="0" step="1" id="MaxActiveRequestsPerUser" name="MaxActiveRequestsPerUser" />
+                    <div class="fieldDescription">Se aplica solo, sin aprobación. Cuando una solicitud termina, deja sitio para otra. Los administradores no tienen límite, y añadir temporadas o episodios a una serie ya pedida no cuenta. 0 = sin límite.</div>
+                </div>
                 <div class="checkboxContainer">
                     <label>
                         <input is="emby-checkbox" type="checkbox" id="AllowAllUsers" name="AllowAllUsers" />
@@ -251,6 +256,7 @@
                     document.querySelector('#AllowAllUsers').checked = !!config.AllowAllUsers;
                     document.querySelector('#AllowedUserIds').value = (config.AllowedUserIds || []).join(', ');
                     document.querySelector('#EnableSeerrApi').checked = !!config.EnableSeerrApi;
+                    document.querySelector('#MaxActiveRequestsPerUser').value = config.MaxActiveRequestsPerUser == null ? 10 : config.MaxActiveRequestsPerUser;
                     document.querySelector('#TmdbApiKey').value = config.TmdbApiKey || '';
                     document.querySelector('#SeerrApiUrl').textContent = ApiClient.serverAddress() + '/Acquisition/seerr';
 
@@ -428,6 +434,7 @@
                         config.RemoveTagsAfterImport = document.querySelector('#RemoveTagsAfterImport').checked;
                         config.AllowAllUsers = document.querySelector('#AllowAllUsers').checked;
                         config.EnableSeerrApi = document.querySelector('#EnableSeerrApi').checked;
+                        config.MaxActiveRequestsPerUser = Math.max(0, parseInt(document.querySelector('#MaxActiveRequestsPerUser').value, 10) || 0);
                         config.TmdbApiKey = document.querySelector('#TmdbApiKey').value.trim();
                         var usersStr = document.querySelector('#AllowedUserIds').value;
                         config.AllowedUserIds = usersStr ? usersStr.split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];

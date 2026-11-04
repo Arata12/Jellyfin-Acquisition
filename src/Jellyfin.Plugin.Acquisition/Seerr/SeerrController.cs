@@ -318,7 +318,7 @@ public class SeerrController : ControllerBase
                 return Message(StatusCodes.Status400BadRequest, "Solicitud no válida.");
             }
 
-            var created = await _bridge.CreateRequestAsync(user.Id, dto, HttpContext.RequestAborted).ConfigureAwait(false);
+            var created = await _bridge.CreateRequestAsync(user.Id, dto, HttpContext.RequestAborted, SecurityHelper.IsAdmin(user.Id, _userManager)).ConfigureAwait(false);
             return Json(created, StatusCodes.Status201Created);
         });
 

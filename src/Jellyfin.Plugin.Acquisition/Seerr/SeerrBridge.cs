@@ -38,7 +38,7 @@ public interface ISeerrBridge
     /// <summary>Destinations offered as Seerr "servers"; empty when there is nothing to choose.</summary>
     Task<List<SeerrServiceInstanceDto>> ListServersAsync(MediaKind kind, CancellationToken ct = default);
 
-    Task<SeerrRequestDto> CreateRequestAsync(Guid userId, SeerrCreateRequestDto body, CancellationToken ct = default);
+    Task<SeerrRequestDto> CreateRequestAsync(Guid userId, SeerrCreateRequestDto body, CancellationToken ct = default, bool exemptFromLimit = false);
 }
 
 /// <summary>
@@ -305,7 +305,7 @@ public class SeerrBridge : ISeerrBridge
         }).ToList();
     }
 
-    public async Task<SeerrRequestDto> CreateRequestAsync(Guid userId, SeerrCreateRequestDto body, CancellationToken ct = default)
+    public async Task<SeerrRequestDto> CreateRequestAsync(Guid userId, SeerrCreateRequestDto body, CancellationToken ct = default, bool exemptFromLimit = false)
     {
         if (body.Is4k)
         {
@@ -421,6 +421,12 @@ public class SeerrBridge : ISeerrBridge
         if (existing != null)
         {
             throw new SeerrApiException(StatusCodes.Status409Conflict, "Ya hay una solicitud activa para este título. Puedes seguirla desde Jellyfin.");
+        }
+
+        var limitMessage = await RequestLimit.CheckAsync(userId, exemptFromLimit, Plugin.Instance?.Configuration, _requestRepo, ct).ConfigureAwait(false);
+        if (limitMessage != null)
+        {
+            throw new SeerrApiException(StatusCodes.Status429TooManyRequests, limitMessage);
         }
 
         string? destinationId = null;

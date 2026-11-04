@@ -154,6 +154,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public string TmdbApiKey { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Requests in progress a non-admin user may have at once (0 = no limit). Enforced automatically; adding seasons or
+    /// episodes to a series already requested does not count.
+    /// </summary>
+    public int MaxActiveRequestsPerUser { get; set; } = 10;
+
     // Security & User Permissions
     public List<string> AllowedUserIds { get; set; } = [];
     public bool AllowAllUsers { get; set; } = false;

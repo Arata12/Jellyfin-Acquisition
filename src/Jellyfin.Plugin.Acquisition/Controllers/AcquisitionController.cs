@@ -273,6 +273,12 @@ public class AcquisitionController : ControllerBase
             return Conflict(new ConflictResponseDto { Message = "Ya hay una solicitud en curso para este título.", RequestId = existing.Id });
         }
 
+        var limitMessage = await RequestLimit.CheckAsync(userId.Value, SecurityHelper.IsAdmin(userId.Value, _userManager), config, _requestRepo, ct).ConfigureAwait(false);
+        if (limitMessage != null)
+        {
+            return StatusCode(StatusCodes.Status429TooManyRequests, new ErrorResponseDto { Message = limitMessage });
+        }
+
         // The destination is resolved on the server from a stable identifier; browser-sent paths are never used
         var resolution = await DestinationResolver.ResolveAsync(dto.Kind, dto.DestinationId, dto.DestinationName, config, _sonarrClient, _radarrClient, ct).ConfigureAwait(false);
         if (resolution.Destination == null)

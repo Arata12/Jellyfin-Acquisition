@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.Acquisition.Configuration;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -52,6 +53,50 @@ public class RequestManagementTests
         var r = new AcquisitionRequest { Id = id, UserId = user, Kind = MediaKind.Movie, Title = id, Status = status, UpdatedAt = updated, CreatedAt = updated, ScopeConfirmed = true };
         tweak?.Invoke(r);
         return r;
+    }
+
+    // ---- Per-user limit ----
+
+    private static Mock<IRequestRepository> RepoWith(params AcquisitionRequest[] requests)
+    {
+        var repo = new Mock<IRequestRepository>();
+        repo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(requests);
+        return repo;
+    }
+
+    [Fact]
+    public async Task Limit_BlocksANewRequestWhenTheUserHasTheMaximumInProgress()
+    {
+        var me = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var repo = RepoWith(
+            Req("a", me, RequestStatus.Searching, now),
+            Req("b", me, RequestStatus.Downloading, now),
+            Req("c", Guid.NewGuid(), RequestStatus.Searching, now));
+        var config = new PluginConfiguration { MaxActiveRequestsPerUser = 2 };
+
+        var message = await RequestLimit.CheckAsync(me, false, config, repo.Object, CancellationToken.None);
+
+        Assert.NotNull(message);
+        Assert.Contains("2", message);
+        Assert.Null(await RequestLimit.CheckAsync(me, true, config, repo.Object, CancellationToken.None));
+        Assert.Null(await RequestLimit.CheckAsync(me, false, new PluginConfiguration { MaxActiveRequestsPerUser = 0 }, repo.Object, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Limit_IgnoresFinishedFollowedAndUnconfirmedRequests()
+    {
+        var me = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var repo = RepoWith(
+            Req("done", me, RequestStatus.Available, now),
+            Req("failed", me, RequestStatus.Failed, now),
+            Req("following", me, RequestStatus.Available, now, r => { r.Kind = MediaKind.Series; r.FollowAiring = true; }),
+            Req("picking", me, RequestStatus.Pending, now, r => { r.Kind = MediaKind.Series; r.ScopeConfirmed = false; }),
+            Req("active", me, RequestStatus.Searching, now));
+        var config = new PluginConfiguration { MaxActiveRequestsPerUser = 2 };
+
+        Assert.Null(await RequestLimit.CheckAsync(me, false, config, repo.Object, CancellationToken.None));
     }
 
     [Fact]
