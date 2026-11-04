@@ -149,6 +149,77 @@ public class AcquisitionController : ControllerBase
     }
 
     /// <summary>
+    /// Requests of the current user ("Tus solicitudes"); administrators get everyone's with the requester's name.
+    /// </summary>
+    [HttpGet("requests")]
+    [Authorize]
+    [ProducesResponseType(typeof(List<RequestSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<List<RequestSummaryDto>>> ListRequests(CancellationToken ct)
+    {
+        var rows = await LoadSummariesAsync(ct).ConfigureAwait(false);
+        if (rows == null) return Unauthorized();
+        await FillMissingPostersAsync(rows, ct).ConfigureAwait(false);
+        return Ok(rows);
+    }
+
+    // Requests created before posters were stored get one from the catalog when listed (kept once they are finished)
+    private async Task FillMissingPostersAsync(List<RequestSummaryDto> rows, CancellationToken ct)
+    {
+        var userId = GetValidatedUserId();
+        if (!userId.HasValue) return;
+
+        var missing = rows.Where(r => string.IsNullOrEmpty(r.PosterUrl)).Take(12).ToList();
+        await Task.WhenAll(missing.Select(async row =>
+        {
+            var providerId = row.Kind == MediaKind.Series ? row.ProviderIds?.Tvdb : row.ProviderIds?.Tmdb;
+            if (string.IsNullOrWhiteSpace(providerId)) return;
+            try
+            {
+                var details = await _catalogService.GetDetailsAsync(userId.Value, row.Kind, providerId, ct).ConfigureAwait(false);
+                var poster = RequestPoster.Sanitize(details?.PosterUrl);
+                if (poster == null) return;
+                row.PosterUrl = poster;
+
+                // Only finished requests are written back: an active one may be saved by the tracker at the same time
+                var request = await _requestRepo.GetByIdAsync(row.Id, ct).ConfigureAwait(false);
+                if (request != null && !request.IsActive && string.IsNullOrEmpty(request.PosterUrl))
+                {
+                    request.PosterUrl = poster;
+                    await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "Could not find a poster for request {RequestId}", row.Id);
+            }
+        })).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// How many of the requests the user sees need their action (header badge). Cheap enough to poll.
+    /// </summary>
+    [HttpGet("requests/attention-count")]
+    [Authorize]
+    [ProducesResponseType(typeof(AttentionCountDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AttentionCountDto>> GetAttentionCount(CancellationToken ct)
+    {
+        var rows = await LoadSummariesAsync(ct).ConfigureAwait(false);
+        return rows == null ? Unauthorized() : Ok(new AttentionCountDto { Count = rows.Count(r => r.NeedsAction) });
+    }
+
+    private async Task<List<RequestSummaryDto>?> LoadSummariesAsync(CancellationToken ct)
+    {
+        var userId = GetValidatedUserId();
+        if (!userId.HasValue) return null;
+
+        var isAdmin = SecurityHelper.IsAdmin(userId.Value, _userManager);
+        var all = await _requestRepo.GetAllAsync(ct).ConfigureAwait(false);
+        return RequestSummaries.Build(all, userId.Value, isAdmin, id => _userManager.GetUserById(id)?.Username, DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
     /// Create a new acquisition request.
     /// </summary>
     [HttpPost("requests")]
@@ -224,7 +295,10 @@ public class AcquisitionController : ControllerBase
             DestinationName = destination.Name,
             RootFolderPath = destination.RootFolderPath,
             QualityProfileId = destination.QualityProfileId > 0 ? destination.QualityProfileId : null,
-            SeriesType = destination.SeriesType
+            SeriesType = destination.SeriesType,
+            PosterUrl = RequestPoster.Sanitize(dto.PosterUrl),
+            // Movies and "Serie completa" have nothing left to confirm; otherwise the user still has to pick the episodes
+            ScopeConfirmed = dto.Kind == MediaKind.Movie || (dto.Scope?.All ?? false)
         };
 
         request.AddHistory(RequestStatus.Pending, "Solicitud creada por el usuario.");
@@ -370,6 +444,7 @@ public class AcquisitionController : ControllerBase
                 return Conflict("La selección solo se puede confirmar mientras la solicitud está pendiente.");
             }
 
+            request.ScopeConfirmed = true;
             request.Scope.All = confirmation.All;
             request.FollowAiring = request.Kind == MediaKind.Series && confirmation.All;
             request.Scope.SeasonNumbers = confirmation.SeasonNumbers ?? [];
@@ -778,7 +853,8 @@ public class AcquisitionController : ControllerBase
     }
 
     /// <summary>
-    /// Cancel a request that is not yet available. Stops tracking only: a torrent already sent to qBittorrent is not removed.
+    /// Cancel a request that is not yet available. With <c>deleteDownloads=true</c> it also removes, with their files, the torrents
+    /// not yet imported (and the title from Sonarr/Radarr when the plugin added it and nothing else uses it).
     /// </summary>
     [HttpDelete("requests/{id}")]
     [Authorize]
@@ -787,7 +863,7 @@ public class AcquisitionController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> CancelRequest([FromRoute] string id, CancellationToken ct)
+    public async Task<IActionResult> CancelRequest([FromRoute] string id, [FromQuery] bool deleteDownloads = false, CancellationToken ct = default)
     {
         var userId = GetValidatedUserId();
         if (!userId.HasValue) return Unauthorized();
@@ -796,6 +872,7 @@ public class AcquisitionController : ControllerBase
         var result = await _trackerService.CancelRequestAsync(
             id,
             req => SecurityHelper.CanManageRequest(userId.Value, req, _userManager, config),
+            deleteDownloads,
             ct).ConfigureAwait(false);
 
         return result.Outcome switch
@@ -1079,7 +1156,8 @@ public class AcquisitionController : ControllerBase
             History = r.History,
             Progress = BuildProgress(r),
             NextAttemptUtc = r.NextAttemptUtc,
-            AutoReleaseSelection = r.AutoReleaseSelection
+            AutoReleaseSelection = r.AutoReleaseSelection,
+            ManualReleaseMode = Plugin.Instance?.Configuration.IsManualReleaseSelection() == true
         };
     }
 
@@ -1109,7 +1187,7 @@ public class AcquisitionController : ControllerBase
     /// <summary>
     /// Summary of the request's downloads (episodes or season packs) for the status view.
     /// </summary>
-    private static RequestProgressDto BuildProgress(AcquisitionRequest r)
+    public static RequestProgressDto BuildProgress(AcquisitionRequest r)
     {
         var active = r.GetActiveUnit();
         var manual = Plugin.Instance?.Configuration.IsManualReleaseSelection() == true && !r.AutoReleaseSelection;

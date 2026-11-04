@@ -7,6 +7,10 @@
     // The section and the query it shows; React may re-render the search page and drop or reorder foreign nodes
     let currentSection = null;
     let renderedQuery = '';
+    // What the section shows: "requests" (empty search box) or "external" (results for the typed query)
+    let sectionMode = '';
+    let requestsLoading = false;
+    let requestsRetryAfter = 0;
 
     // "auto" follows the installed theme: Abyss defines --abyss-accent on :root, classic Jellyfin does not
     function resolveStyle() {
@@ -156,6 +160,105 @@
         };
     }
 
+    // ---- Spanish labels for TMDB/Sonarr metadata (unknown values pass through unchanged) ----
+    const LANGUAGE_NAMES = {
+        english: 'Inglés', japanese: 'Japonés', spanish: 'Español', korean: 'Coreano', french: 'Francés',
+        german: 'Alemán', italian: 'Italiano', chinese: 'Chino', mandarin: 'Mandarín', cantonese: 'Cantonés',
+        portuguese: 'Portugués', russian: 'Ruso', hindi: 'Hindi', thai: 'Tailandés', turkish: 'Turco',
+        arabic: 'Árabe', dutch: 'Neerlandés', swedish: 'Sueco', norwegian: 'Noruego', danish: 'Danés',
+        finnish: 'Finés', polish: 'Polaco', czech: 'Checo', hungarian: 'Húngaro', greek: 'Griego',
+        hebrew: 'Hebreo', ukrainian: 'Ucraniano', indonesian: 'Indonesio', vietnamese: 'Vietnamita',
+        tagalog: 'Tagalo', filipino: 'Filipino', catalan: 'Catalán', romanian: 'Rumano', persian: 'Persa',
+        tamil: 'Tamil', telugu: 'Telugu', bengali: 'Bengalí', malay: 'Malayo', icelandic: 'Islandés'
+    };
+
+    const GENRE_NAMES = {
+        'action': 'Acción', 'adventure': 'Aventura', 'animation': 'Animación', 'anime': 'Anime', 'comedy': 'Comedia',
+        'crime': 'Crimen', 'documentary': 'Documental', 'drama': 'Drama', 'family': 'Familiar', 'fantasy': 'Fantasía',
+        'history': 'Historia', 'horror': 'Terror', 'music': 'Música', 'musical': 'Musical', 'mystery': 'Misterio',
+        'romance': 'Romance', 'science fiction': 'Ciencia ficción', 'sci-fi': 'Ciencia ficción',
+        'sci-fi & fantasy': 'Ciencia ficción y fantasía', 'action & adventure': 'Acción y aventura',
+        'thriller': 'Suspense', 'war': 'Bélica', 'western': 'Wéstern', 'reality': 'Telerrealidad',
+        'talk': 'Entrevistas', 'kids': 'Infantil', 'children': 'Infantil', 'news': 'Noticias', 'soap': 'Telenovela',
+        'war & politics': 'Bélica y política', 'sports': 'Deportes', 'sport': 'Deporte', 'game show': 'Concurso',
+        'tv movie': 'Película de TV', 'television movie': 'Película de TV', 'mini-series': 'Miniserie',
+        'suspense': 'Suspense', 'indie': 'Independiente', 'food': 'Gastronomía', 'travel': 'Viajes',
+        'home and garden': 'Hogar y jardín', 'special interest': 'Interés especial'
+    };
+
+    function translateLabel(map, value) {
+        const text = String(value ?? '').trim();
+        return map[text.toLowerCase()] || text;
+    }
+
+    function translateLanguage(value) {
+        return translateLabel(LANGUAGE_NAMES, value);
+    }
+
+    function translateGenre(value) {
+        return translateLabel(GENRE_NAMES, value);
+    }
+
+    // ---- "Tus solicitudes" ----
+    function normalizeRequestSummary(raw) {
+        const r = raw || {};
+        const p = r.progress || r.Progress || {};
+        const providerIds = r.providerIds || r.ProviderIds || {};
+        return {
+            id: r.id ?? r.Id ?? '',
+            kind: kindName(r.kind !== undefined ? r.kind : r.Kind),
+            title: r.title ?? r.Title ?? '',
+            year: r.year !== undefined ? r.year : r.Year,
+            posterUrl: r.posterUrl ?? r.PosterUrl ?? '',
+            providerIds: {
+                tvdb: providerIds.tvdb ?? providerIds.Tvdb ?? null,
+                tmdb: providerIds.tmdb ?? providerIds.Tmdb ?? null,
+                imdb: providerIds.imdb ?? providerIds.Imdb ?? null
+            },
+            status: statusName(r.status !== undefined ? r.status : r.Status),
+            needsAction: Boolean(r.needsAction ?? r.NeedsAction),
+            requestedBy: r.requestedBy ?? r.RequestedBy ?? null,
+            progress: {
+                total: Number(p.total ?? p.Total ?? 0) || 0,
+                available: Number(p.available ?? p.Available ?? 0) || 0,
+                attention: Number(p.attention ?? p.Attention ?? 0) || 0,
+                awaitingSelection: Boolean(p.awaitingSelection ?? p.AwaitingSelection),
+                following: Boolean(p.following ?? p.Following),
+                waitingForAir: p.waitingForAir ?? p.WaitingForAir ?? null
+            }
+        };
+    }
+
+    // Short line under the title of a request card
+    function requestMetaText(r) {
+        const p = r.progress;
+        let text;
+        if (p.awaitingSelection) text = 'Elige una release';
+        else if (p.attention > 0 || r.status === 'RequiresAttention') text = 'Requiere atención';
+        else if (p.waitingForAir) text = r.kind === 'Movie' ? 'Esperando estreno' : 'Esperando emisión';
+        else if (p.total > 1) text = `${p.available} de ${p.total} disponibles`;
+        else if (r.status === 'Available') text = p.following ? 'Siguiendo la emisión' : 'Disponible';
+        else text = STATUS_LABELS[r.status] || '';
+        if (!text) text = r.kind === 'Movie' ? 'Película' : 'Serie';
+        if (p.following && p.total > 1) text += ' · Siguiendo';
+        if (r.requestedBy) text += ` · ${r.requestedBy}`;
+        return text;
+    }
+
+    // Catalog-like item so a request card can reuse createItemCard and openDetailsModal (which opens the status view)
+    function requestToItem(r) {
+        return {
+            id: r.id,
+            kind: r.kind,
+            title: r.title,
+            year: r.year,
+            posterUrl: r.posterUrl,
+            providerIds: r.providerIds,
+            requestId: r.id,
+            requestStatus: r.status
+        };
+    }
+
     function init() {
         document.addEventListener('input', (e) => {
             const target = e.target;
@@ -201,6 +304,10 @@
 
     function checkPageContext() {
         keepSectionInPlace();
+        maintainRequestsSection();
+        ensureHeaderButton();
+        // The count only exists for a logged-in user
+        if (hasSession()) startAttentionPolling();
         checkSeriesDetailsPage();
     }
 
@@ -238,6 +345,11 @@
         clearTimeout(debounceTimer);
         const query = (val || '').trim();
 
+        // Typing replaces "Tus solicitudes"; clearing the box brings it back (maintainRequestsSection)
+        if (query.length > 0 && sectionMode === 'requests') {
+            removeExternalSection();
+        }
+
         if (query.length < MIN_AUTO_SEARCH_LENGTH) {
             if (currentAbortController) {
                 currentAbortController.abort();
@@ -264,6 +376,7 @@
         const signal = currentAbortController.signal;
 
         renderedQuery = query;
+        sectionMode = 'external';
         try {
             renderLoadingIndicator();
             const apiBase = getApiBase();
@@ -309,6 +422,238 @@
         if (el) el.remove();
         currentSection = null;
         renderedQuery = '';
+        sectionMode = '';
+    }
+
+    function findSearchInput() {
+        if (activeSearchInput && activeSearchInput.isConnected) return activeSearchInput;
+        return document.querySelector('#searchTextInput, .searchfields-txtSearch, input[type=search]');
+    }
+
+    // Shows "Tus solicitudes" on the search page while the search box is empty
+    function maintainRequestsSection() {
+        if (!isSearchRoute()) {
+            // The search page (and the section with it) is gone; a stale reference must not block the next visit
+            if (currentSection) removeExternalSection();
+            return;
+        }
+        if (requestsLoading || Date.now() < requestsRetryAfter) return;
+
+        const input = findSearchInput();
+        if (!input || (input.value || '').trim().length > 0) return;
+        if (sectionMode === 'requests' && currentSection && currentSection.isConnected) return;
+        // Results of a previous query with the box now empty (cleared without an input event)
+        if (sectionMode === 'external') removeExternalSection();
+
+        activeSearchInput = input;
+        loadRequestsSection();
+    }
+
+    function isRequestsSectionVisible() {
+        return sectionMode === 'requests' && currentSection && currentSection.isConnected;
+    }
+
+    async function fetchRequestSummaries() {
+        const resp = await fetch(`${getApiBase()}/Acquisition/requests`, { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        return (Array.isArray(data) ? data : []).map(normalizeRequestSummary);
+    }
+
+    async function loadRequestsSection() {
+        const container = getSearchContainer();
+        if (!container) return;
+        requestsLoading = true;
+        try {
+            const rows = await fetchRequestSummaries();
+            const input = findSearchInput();
+            // The user may have typed or left the page while the list was loading
+            if (!isSearchRoute() || sectionMode === 'external' || !input || (input.value || '').trim().length > 0) return;
+            const target = getSearchContainer();
+            if (!target) return;
+            sectionMode = 'requests';
+            renderedQuery = '';
+            renderRequestsSection(ensureSectionAttached(target), rows);
+        } catch (err) {
+            // No list is better than a broken search page; try again in a while
+            console.warn('[Acquisition] Could not load requests:', err);
+            requestsRetryAfter = Date.now() + 30000;
+        } finally {
+            requestsLoading = false;
+        }
+    }
+
+    function renderRequestsSection(section, rows) {
+        const needing = rows.filter(r => r.needsAction).length;
+        const subtitle = needing > 0
+            ? `${rows.length} solicitud${rows.length === 1 ? '' : 'es'} • ${needing} necesita${needing === 1 ? '' : 'n'} tu atención`
+            : rows.length > 0 ? `${rows.length} solicitud${rows.length === 1 ? '' : 'es'}` : '';
+        section.innerHTML = `
+            <div class="acquisition-header">
+                <h2>Tus solicitudes</h2>
+                ${subtitle ? `<span class="acquisition-subtitle">${escapeHtml(subtitle)}</span>` : ''}
+            </div>
+            ${rows.length === 0
+                ? '<div class="acquisition-empty"><p class="acquisition-empty-text">No tienes solicitudes. Busca una película o serie para pedirla.</p></div>'
+                : '<div class="acquisition-cards-grid" id="acquisition-requests-grid"></div>'}
+        `;
+
+        const grid = section.querySelector('#acquisition-requests-grid');
+        if (!grid) return;
+        rows.forEach(r => {
+            const card = createItemCard(requestToItem(r), { metaText: requestMetaText(r) });
+            if (r.needsAction) card.classList.add('needs-action');
+            grid.appendChild(card);
+        });
+    }
+
+    // ---- Header button ("Mis solicitudes") with the number of requests that need the user's action ----
+    const COUNT_POLL_MS = 60000;
+    const LAST_COUNT_KEY = 'acquisition.lastAttentionCount';
+    const TOAST_MS = 8000;
+    let attentionTimer = null;
+    let toastTimer = null;
+
+    const REQUESTS_ICON_SVG = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true" focusable="false">' +
+        '<path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 7h2v2H7V7zm4 0h6v2h-6V7zm-4 4h2v2H7v-2zm4 0h6v2h-6v-2zm-4 4h2v2H7v-2zm4 0h6v2h-6v-2z"/></svg>';
+
+    function hasSession() {
+        const api = typeof window !== 'undefined' ? window.ApiClient : null;
+        return Boolean(api && api.accessToken && api.accessToken());
+    }
+
+    // Jellyfin Web 10.9+ (React) puts the search button in the app bar (an <a> to the search route inside .MuiToolbar-root);
+    // the legacy header (.headerRight with .headerSearchButton) is still in the DOM but hidden there, so only a visible
+    // candidate counts. The button goes right before the search button.
+    function isShown(el) {
+        if (!el || !el.getClientRects || el.getClientRects().length === 0) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+    }
+
+    function findHeaderSearchButton() {
+        const candidates = document.querySelectorAll(
+            '.MuiAppBar-root a[href*="search"], .MuiToolbar-root a[href*="search"], .headerSearchButton, .skinHeader a[href*="search"], header a[href*="search"], ' +
+            '.MuiAppBar-root button[aria-label="Search"], .MuiAppBar-root button[aria-label="Buscar"], .skinHeader button[aria-label="Search"], .skinHeader button[aria-label="Buscar"]');
+        return Array.from(candidates).find(isShown) || null;
+    }
+
+    function ensureHeaderButton() {
+        if (!hasSession()) return;
+        const searchButton = findHeaderSearchButton();
+        const existing = document.getElementById('acquisition-requests-button');
+        if (existing) {
+            // Left in a header that is now hidden (e.g. the legacy one): move it next to the visible search button
+            if (isShown(existing) || !searchButton) return;
+            existing.remove();
+        }
+
+        const headerRight = searchButton ? null : Array.from(document.querySelectorAll('.headerRight')).find(isShown);
+        if (!searchButton && !headerRight) return;
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.id = 'acquisition-requests-button';
+        btn.className = themeClassName('acquisition-header-btn paper-icon-button-light');
+        btn.title = 'Mis solicitudes';
+        btn.setAttribute('aria-label', 'Mis solicitudes');
+        btn.innerHTML = `${REQUESTS_ICON_SVG}<span class="acquisition-header-badge" style="display: none;"></span>`;
+        btn.addEventListener('click', goToRequests);
+
+        if (searchButton) {
+            searchButton.parentElement.insertBefore(btn, searchButton);
+        } else {
+            headerRight.insertBefore(btn, headerRight.firstChild);
+        }
+        refreshAttentionCount();
+    }
+
+    function goToRequests() {
+        dismissToast();
+        if (isSearchRoute()) {
+            // Already there: show the list again if the search box is empty
+            requestsRetryAfter = 0;
+            maintainRequestsSection();
+            if (isRequestsSectionVisible()) loadRequestsSection();
+        } else {
+            window.location.hash = '#/search';
+        }
+    }
+
+    function setBadge(count) {
+        const badge = document.querySelector('#acquisition-requests-button .acquisition-header-badge');
+        if (!badge) return;
+        badge.textContent = count > 99 ? '99+' : String(count);
+        badge.style.display = count > 0 ? '' : 'none';
+        const btn = document.getElementById('acquisition-requests-button');
+        if (btn) btn.title = count > 0 ? `Mis solicitudes (${count} necesitan tu atención)` : 'Mis solicitudes';
+    }
+
+    function readLastCount() {
+        try {
+            const raw = window.sessionStorage.getItem(LAST_COUNT_KEY);
+            const n = raw === null ? 0 : parseInt(raw, 10);
+            return Number.isFinite(n) ? n : 0;
+        } catch (err) {
+            return 0;
+        }
+    }
+
+    function writeLastCount(count) {
+        try {
+            window.sessionStorage.setItem(LAST_COUNT_KEY, String(count));
+        } catch (err) {
+            // Without storage the toast may repeat after a reload; nothing else depends on it
+        }
+    }
+
+    async function refreshAttentionCount() {
+        if (!hasSession() || document.visibilityState === 'hidden') return;
+        try {
+            const resp = await fetch(`${getApiBase()}/Acquisition/requests/attention-count`, { headers: getAuthHeaders() });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const count = Math.max(0, Number(data.count ?? data.Count ?? 0) || 0);
+            setBadge(count);
+            const last = readLastCount();
+            writeLastCount(count);
+            if (count > last) showAttentionToast(count);
+        } catch (err) {
+            // The badge keeps its last value
+        }
+    }
+
+    function startAttentionPolling() {
+        if (attentionTimer) return;
+        attentionTimer = setInterval(refreshAttentionCount, COUNT_POLL_MS);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') refreshAttentionCount();
+        });
+        // Anything done in the modal (choosing a release, cancelling, requesting) can change the count
+        document.addEventListener('acquisition-modal-closed', () => {
+            refreshAttentionCount();
+            if (isRequestsSectionVisible()) loadRequestsSection();
+        });
+    }
+
+    function dismissToast() {
+        clearTimeout(toastTimer);
+        const el = document.getElementById('acquisition-toast');
+        if (el) el.remove();
+    }
+
+    function showAttentionToast(count) {
+        dismissToast();
+        const toast = document.createElement('div');
+        toast.id = 'acquisition-toast';
+        toast.className = themeClassName('acquisition-toast');
+        toast.setAttribute('role', 'status');
+        toast.textContent = count === 1
+            ? 'Tienes 1 solicitud que necesita tu atención'
+            : `Tienes ${count} solicitudes que necesitan tu atención`;
+        toast.addEventListener('click', goToRequests);
+        document.body.appendChild(toast);
+        toastTimer = setTimeout(dismissToast, TOAST_MS);
     }
 
     function ensureSectionAttached(container) {
@@ -410,7 +755,7 @@
         });
     }
 
-    function createItemCard(rawItem) {
+    function createItemCard(rawItem, options) {
         const item = normalizeCatalogItem(rawItem);
         const card = document.createElement('div');
         card.className = 'acquisition-card';
@@ -435,6 +780,8 @@
             metaText += item.missingEpisodes === 1 ? ' · Falta 1 episodio' : ` · Faltan ${item.missingEpisodes} episodios`;
         }
 
+        if (options && options.metaText) metaText = options.metaText;
+
         card.innerHTML = `
             <div class="acquisition-card-image-box">
                 ${posterHtml(item, posterSrc, 'acquisition-card-image')}
@@ -457,12 +804,39 @@
                     tmdb: item.providerIds.tmdb,
                     imdb: item.providerIds.imdb
                 });
+            } else if (item.requestId && !item.overview) {
+                openRequestWithDetails(item, card);
             } else {
                 openDetailsModal(item);
             }
         });
 
         return card;
+    }
+
+    // Cards of "Tus solicitudes" only carry what the request stores: the description, poster and facts come from the catalog
+    async function openRequestWithDetails(item, card) {
+        const providerId = item.kind === 'Series' ? item.providerIds.tvdb : item.providerIds.tmdb;
+        let merged = item;
+        if (providerId && !card.dataset.loading) {
+            card.dataset.loading = '1';
+            try {
+                const resp = await fetch(`${getApiBase()}/Acquisition/catalog/${encodeURIComponent(item.kind)}/${encodeURIComponent(providerId)}`, { headers: getAuthHeaders() });
+                if (resp.ok) {
+                    const details = normalizeCatalogItem(await resp.json());
+                    merged = Object.assign({}, details, {
+                        requestId: item.requestId,
+                        requestStatus: item.requestStatus,
+                        posterUrl: details.posterUrl || item.posterUrl
+                    });
+                }
+            } catch (err) {
+                console.warn('[Acquisition] Could not load title details:', err);
+            } finally {
+                delete card.dataset.loading;
+            }
+        }
+        openDetailsModal(merged);
     }
 
     function resolvePosterSrc(item) {
@@ -506,6 +880,7 @@
         }
         modal.dispatchEvent(new Event('acquisition-closed'));
         modal.remove();
+        document.dispatchEvent(new Event('acquisition-modal-closed'));
     }
 
     function isUnconfirmedSeriesScope(req) {
@@ -534,12 +909,12 @@
         if (item.originalTitle) facts.push(`Título original: ${item.originalTitle}`);
         if (item.network) facts.push(item.network);
         if (item.studio) facts.push(item.studio);
-        if (item.originalLanguage) facts.push(item.originalLanguage);
+        if (item.originalLanguage) facts.push(translateLanguage(item.originalLanguage));
         if (item.seasonCount > 0) facts.push(item.seasonCount === 1 ? '1 temporada' : `${item.seasonCount} temporadas`);
         if (item.episodeCount > 0) facts.push(item.episodeCount === 1 ? '1 episodio' : `${item.episodeCount} episodios`);
         if (item.seriesStatus && SERIES_STATUS_LABELS[item.seriesStatus]) facts.push(SERIES_STATUS_LABELS[item.seriesStatus]);
         if (item.runtimeMinutes > 0) facts.push(`${item.runtimeMinutes} min`);
-        if (Array.isArray(item.genres) && item.genres.length > 0) facts.push(item.genres.slice(0, 4).join(', '));
+        if (Array.isArray(item.genres) && item.genres.length > 0) facts.push(item.genres.slice(0, 4).map(translateGenre).join(', '));
 
         const links = (item.externalLinks || []).filter(l => l.name && /^https:\/\//.test(l.url || ''));
         let html = '';
@@ -592,14 +967,15 @@
                         <div id="acquisition-scope-area" class="acquisition-scope-area" style="display: none;">
                             <h3>Seleccionar contenido a solicitar</h3>
                             <div class="scope-options">
-                                <label><input type="radio" name="scopeType" value="all" checked /> Serie completa</label>
+                                <label><input type="radio" name="scopeType" value="all" /> Serie completa</label>
                                 <label><input type="radio" name="scopeType" value="custom" /> Seleccionar episodios</label>
                             </div>
+                            <p id="scope-all-summary" class="acquisition-scope-summary" style="display: none;"></p>
                             <div id="episodes-container" class="episodes-checklist" style="display: none;">
                                 <em>Cargando episodios...</em>
                             </div>
                             <div class="scope-actions">
-                                <button id="btn-confirm-scope" class="acquisition-btn-primary">Confirmar y solicitar</button>
+                                <button id="btn-confirm-scope" class="acquisition-btn-primary" disabled>Confirmar y solicitar</button>
                                 <button id="btn-back-status" class="acquisition-btn-secondary" style="display: none;">Volver</button>
                             </div>
                         </div>
@@ -615,9 +991,11 @@
                                 <button id="btn-view-local" class="acquisition-btn-primary" style="display: none;">Ver en biblioteca</button>
                                 <button id="btn-view-releases" class="acquisition-btn-secondary" style="display: none;">Seleccionar release</button>
                                 <button id="btn-retry" class="acquisition-btn-secondary" style="display: none;">Reintentar</button>
+                                <button id="btn-skip-parked" class="acquisition-btn-secondary" style="display: none;" title="Deja de intentar los que fallan; podrás volver a pedirlos más tarde">Omitir apartados</button>
                                 <button id="btn-add-episodes" class="acquisition-btn-secondary" style="display: none;">Añadir temporadas o episodios</button>
                                 <button id="btn-cancel-request" class="acquisition-btn-secondary" style="display: none;">Cancelar solicitud</button>
                             </div>
+                            <div id="cancel-confirm" class="acquisition-cancel-confirm" style="display: none;"></div>
                             <div id="releases-container" class="releases-selection-list" style="display: none;"></div>
                         </div>
                     </div>
@@ -627,6 +1005,8 @@
 
         document.body.appendChild(modal);
         bindPosterFallback(modal);
+        // Season/episode counts for the "Serie completa" summary, also when the picker is cloned from the status view
+        modal.acquisitionItem = item;
 
         const onKeyDown = (e) => {
             if (e.key === 'Escape' && document.body.contains(modal)) closeModal(modal);
@@ -773,11 +1153,41 @@
         });
     }
 
+    // What "Serie completa" will request; counts that are unknown are left out
+    function allScopeSummary(item) {
+        const seasons = Number(item && item.seasonCount) || 0;
+        const episodes = Number(item && item.episodeCount) || 0;
+        const episodesText = episodes === 1 ? '1 episodio ya emitido' : `${episodes} episodios ya emitidos`;
+        let text;
+        if (seasons > 0) {
+            text = `${seasons === 1 ? 'Se pedirá 1 temporada' : `Se pedirán ${seasons} temporadas`}${episodes > 0 ? ` (${episodesText})` : ''}`;
+        } else if (episodes > 0) {
+            text = `${episodes === 1 ? 'Se pedirá' : 'Se pedirán'} ${episodesText}`;
+        } else {
+            text = 'Se pedirá la serie completa';
+        }
+        const ended = String(item && item.seriesStatus || '').toLowerCase() === 'ended';
+        return ended ? `${text}.` : `${text} y se descargarán los episodios nuevos según se emitan.`;
+    }
+
+    function updateAllScopeSummary(root, item) {
+        const summary = root.querySelector('#scope-all-summary');
+        if (!summary) return;
+        const checked = root.querySelector('input[name="scopeType"]:checked');
+        const show = Boolean(checked && checked.value === 'all');
+        summary.textContent = show ? allScopeSummary(item) : '';
+        summary.style.display = show ? 'block' : 'none';
+    }
+
     async function setupSeriesScopePicker(modal, item, getSelectedDestination, showError, existingRequestId) {
         const episodesContainer = modal.querySelector('#episodes-container');
         const radios = modal.querySelectorAll('input[name="scopeType"]');
         let createdRequest = existingRequestId ? { id: existingRequestId } : null;
         const getDestInfo = typeof getSelectedDestination === 'function' ? getSelectedDestination : () => ({ id: null });
+
+        const btnConfirmScope = modal.querySelector('#btn-confirm-scope');
+        // Nothing is preselected: one stray click must not request a whole series and follow it while it airs
+        btnConfirmScope.disabled = !modal.querySelector('input[name="scopeType"]:checked');
 
         const markUnconfirmed = (id) => { modal.dataset.unconfirmedRequestId = id; };
         const markConfirmed = () => { delete modal.dataset.unconfirmedRequestId; };
@@ -795,12 +1205,15 @@
         if (existingRequestId) {
             markUnconfirmed(existingRequestId);
             modal.querySelector('input[name="scopeType"][value="custom"]').checked = true;
+            btnConfirmScope.disabled = false;
             episodesContainer.style.display = 'block';
             await loadEpisodes();
         }
 
         radios.forEach(r => {
             r.addEventListener('change', async (e) => {
+                btnConfirmScope.disabled = false;
+                updateAllScopeSummary(modal, item);
                 if (e.target.value === 'custom') {
                     episodesContainer.style.display = 'block';
                     if (!createdRequest) {
@@ -833,7 +1246,13 @@
                 if (showError) showError(msg);
             };
 
-            const scopeType = modal.querySelector('input[name="scopeType"]:checked').value;
+            const chosenScope = modal.querySelector('input[name="scopeType"]:checked');
+            if (!chosenScope) {
+                fail('Elige «Serie completa» o «Seleccionar episodios».');
+                return;
+            }
+
+            const scopeType = chosenScope.value;
             if (scopeType === 'all') {
                 // Created right here with the whole series already in its scope: nothing left to confirm
                 let createdWithAll = false;
@@ -1015,7 +1434,9 @@
                 year: item.year,
                 providerIds: item.providerIds,
                 scope: scope,
-                destinationId: destinationId || null
+                destinationId: destinationId || null,
+                // Opaque image path of the catalog item; the server validates it before storing it for "Tus solicitudes"
+                posterUrl: item.posterUrl || null
             };
 
             const resp = await fetch(`${apiBase}/Acquisition/requests`, {
@@ -1089,8 +1510,78 @@
         const btnCancel = modal.querySelector('#btn-cancel-request');
         const releasesContainer = modal.querySelector('#releases-container');
         const btnAddEpisodes = modal.querySelector('#btn-add-episodes');
+        const btnSkipParked = modal.querySelector('#btn-skip-parked');
+        const cancelConfirm = modal.querySelector('#cancel-confirm');
         const requestUrl = `${getApiBase()}/Acquisition/requests/${encodeURIComponent(requestId)}`;
         let stopped = false;
+        // Last state of the request read by poll(): decides what the cancel panel and the auto-select box offer
+        let lastReq = null;
+
+        // The releases panel = automatic-selection box on top + the list of releases (the list is rewritten as it loads)
+        releasesContainer.innerHTML = '';
+        const autoBox = document.createElement('div');
+        autoBox.className = 'acquisition-auto-select';
+        autoBox.style.display = 'none';
+        const releasesList = document.createElement('div');
+        releasesContainer.append(autoBox, releasesList);
+
+        const showNotice = (msg) => {
+            const notice = modal.querySelector('#acquisition-request-error');
+            notice.textContent = msg || '';
+            notice.style.display = msg ? 'block' : 'none';
+        };
+
+        // Manual mode only: offer to let the plugin choose the releases of this request from now on
+        function renderAutoBox() {
+            if (!lastReq || !lastReq.manualReleaseMode) {
+                autoBox.style.display = 'none';
+                return;
+            }
+            autoBox.style.display = 'block';
+            if (lastReq.autoReleaseSelection) {
+                autoBox.innerHTML = '<span>Selección automática activada</span> ' +
+                    '<button type="button" class="acquisition-link-btn" id="btn-auto-select-off">Desactivar</button>';
+            } else {
+                autoBox.innerHTML = '<button type="button" class="acquisition-btn-secondary" id="btn-auto-select-on">Elegir automáticamente a partir de ahora</button>' +
+                    '<p class="acquisition-field-hint">El plugin elegirá la mejor release para este y los siguientes episodios.</p>';
+            }
+            const toggle = autoBox.querySelector('button');
+            toggle.addEventListener('click', async () => {
+                const enabled = !lastReq.autoReleaseSelection;
+                toggle.disabled = true;
+                try {
+                    const resp = await fetch(`${requestUrl}/auto-select`, {
+                        method: 'POST',
+                        headers: getAuthHeaders(),
+                        body: JSON.stringify({ enabled })
+                    });
+                    if (resp.ok) {
+                        showNotice('');
+                        lastReq.autoReleaseSelection = enabled;
+                        renderAutoBox();
+                        poll();
+                    } else {
+                        toggle.disabled = false;
+                        showNotice(await readErrorMessage(resp, 'No se pudo cambiar la selección automática.'));
+                    }
+                } catch (err) {
+                    toggle.disabled = false;
+                    showNotice('Error de conexión al cambiar la selección automática.');
+                }
+            });
+        }
+
+        btnSkipParked.addEventListener('click', async () => {
+            btnSkipParked.disabled = true;
+            try {
+                const resp = await fetch(`${requestUrl}/skip-parked`, { method: 'POST', headers: getAuthHeaders() });
+                showNotice(resp.ok ? '' : await readErrorMessage(resp, 'No se pudieron omitir las descargas apartadas.'));
+            } catch (err) {
+                showNotice('Error de conexión al omitir las descargas apartadas.');
+            }
+            btnSkipParked.disabled = false;
+            poll();
+        });
 
         btnAddEpisodes.addEventListener('click', () => {
             // A fresh copy of the picker: listeners left by the creation flow must not run here
@@ -1108,7 +1599,9 @@
             container.style.display = 'block';
             scopeArea.querySelectorAll('input[name="scopeType"]').forEach(r => r.addEventListener('change', (e) => {
                 container.style.display = e.target.value === 'custom' ? 'block' : 'none';
+                updateAllScopeSummary(scopeArea, modal.acquisitionItem);
             }));
+            updateAllScopeSummary(scopeArea, modal.acquisitionItem);
 
             const backToStatus = () => {
                 scopeArea.style.display = 'none';
@@ -1157,20 +1650,44 @@
             poll();
         });
 
-        btnCancel.addEventListener('click', async () => {
-            if (!window.confirm('¿Cancelar esta solicitud? Si ya se envió a qBittorrent, la descarga no se elimina.')) return;
+        // In-modal confirmation instead of window.confirm; "Dejar de seguir" has nothing to delete, so no checkbox
+        btnCancel.addEventListener('click', () => {
+            const following = Boolean(lastReq && lastReq.status === 'Available');
+            cancelConfirm.innerHTML = following
+                ? '<p class="acquisition-cancel-title">¿Dejar de seguir esta serie?</p>' +
+                  '<p class="acquisition-field-hint">Los episodios ya descargados se conservan; los nuevos dejarán de pedirse.</p>'
+                : '<p class="acquisition-cancel-title">¿Cancelar esta solicitud?</p>' +
+                  '<label class="acquisition-cancel-option"><input type="checkbox" id="chk-delete-downloads" checked /> ' +
+                  'Borrar también lo que se está descargando y aún no está en tu biblioteca</label>';
+            cancelConfirm.innerHTML += '<div class="acquisition-cancel-actions">' +
+                `<button type="button" class="acquisition-btn-primary" id="btn-cancel-yes">${following ? 'Sí, dejar de seguir' : 'Sí, cancelar'}</button>` +
+                '<button type="button" class="acquisition-btn-secondary" id="btn-cancel-no">No</button></div>';
+            cancelConfirm.style.display = 'block';
             btnCancel.disabled = true;
-            const resp = await fetch(requestUrl, { method: 'DELETE', headers: getAuthHeaders() });
-            if (resp.ok) {
-                stopped = true;
-                statusText.textContent = 'Cancelada';
-                statusDetail.textContent = 'La solicitud se ha cancelado.';
-                [btnRetry, btnViewReleases, btnViewLocal, btnCancel].forEach(b => { b.style.display = 'none'; });
-                releasesContainer.style.display = 'none';
-            } else {
+
+            cancelConfirm.querySelector('#btn-cancel-no').addEventListener('click', () => {
+                cancelConfirm.style.display = 'none';
                 btnCancel.disabled = false;
-                statusDetail.textContent = await readErrorMessage(resp, 'No se pudo cancelar la solicitud.');
-            }
+            });
+            cancelConfirm.querySelector('#btn-cancel-yes').addEventListener('click', async (e) => {
+                const deleteBox = cancelConfirm.querySelector('#chk-delete-downloads');
+                const deleteDownloads = Boolean(deleteBox && deleteBox.checked);
+                e.target.disabled = true;
+                const resp = await fetch(deleteDownloads ? `${requestUrl}?deleteDownloads=true` : requestUrl, { method: 'DELETE', headers: getAuthHeaders() });
+                if (resp.ok) {
+                    stopped = true;
+                    statusText.textContent = 'Cancelada';
+                    statusDetail.textContent = 'La solicitud se ha cancelado.';
+                    [btnRetry, btnSkipParked, btnViewReleases, btnViewLocal, btnAddEpisodes, btnCancel].forEach(b => { b.style.display = 'none'; });
+                    cancelConfirm.style.display = 'none';
+                    releasesContainer.style.display = 'none';
+                } else {
+                    e.target.disabled = false;
+                    cancelConfirm.style.display = 'none';
+                    btnCancel.disabled = false;
+                    statusDetail.textContent = await readErrorMessage(resp, 'No se pudo cancelar la solicitud.');
+                }
+            });
         });
 
         btnViewReleases.addEventListener('click', async () => {
@@ -1181,13 +1698,14 @@
             }
 
             releasesContainer.style.display = 'block';
-            releasesContainer.innerHTML = '<em>Cargando releases candidatas...</em>';
+            renderAutoBox();
+            releasesList.innerHTML = '<em>Cargando releases candidatas...</em>';
             btnViewReleases.textContent = 'Ocultar releases';
 
             try {
                 const resp = await fetch(`${requestUrl}/releases`, { headers: getAuthHeaders() });
                 if (!resp.ok) {
-                    releasesContainer.innerHTML = `<em>${escapeHtml(await readErrorMessage(resp, 'Error al cargar releases.'))}</em>`;
+                    releasesList.innerHTML = `<em>${escapeHtml(await readErrorMessage(resp, 'Error al cargar releases.'))}</em>`;
                     return;
                 }
                 const rawReleases = await resp.json();
@@ -1203,7 +1721,7 @@
                     rejectionReasons: rel.rejectionReasons || rel.RejectionReasons || []
                 }));
                 if (releases.length === 0) {
-                    releasesContainer.innerHTML = '<em>No se encontraron releases disponibles.</em>';
+                    releasesList.innerHTML = '<em>No se encontraron releases disponibles.</em>';
                     return;
                 }
 
@@ -1236,9 +1754,9 @@
                         `<summary>${discarded.length} descartada${discarded.length === 1 ? '' : 's'} (ver motivos)</summary>` +
                         `<div class="releases-table">${discarded.map(rowHtml).join('')}</div></details>`;
                 }
-                releasesContainer.innerHTML = html;
+                releasesList.innerHTML = html;
 
-                releasesContainer.querySelectorAll('.btn-select-release').forEach(btn => {
+                releasesList.querySelectorAll('.btn-select-release').forEach(btn => {
                     btn.addEventListener('click', async (e) => {
                         const relId = e.target.dataset.id;
                         btn.disabled = true;
@@ -1266,7 +1784,7 @@
                     });
                 });
             } catch (err) {
-                releasesContainer.innerHTML = '<em>Error de conexión al cargar releases.</em>';
+                releasesList.innerHTML = '<em>Error de conexión al cargar releases.</em>';
             }
         });
 
@@ -1290,6 +1808,9 @@
                         errorMessage: reqRaw.errorMessage ?? reqRaw.ErrorMessage,
                         localItemId: reqRaw.localItemId ?? reqRaw.LocalItemId,
                         progress: reqRaw.progress || reqRaw.Progress || null,
+                        nextAttemptUtc: reqRaw.nextAttemptUtc ?? reqRaw.NextAttemptUtc ?? null,
+                        autoReleaseSelection: Boolean(reqRaw.autoReleaseSelection ?? reqRaw.AutoReleaseSelection),
+                        manualReleaseMode: Boolean(reqRaw.manualReleaseMode ?? reqRaw.ManualReleaseMode),
                         history: (reqRaw.history || reqRaw.History || []).map(h => ({
                             message: h.message ?? h.Message,
                             status: statusName(h.status !== undefined ? h.status : h.Status)
@@ -1297,7 +1818,10 @@
                     };
                     statusText.textContent = STATUS_LABELS[req.status] || req.status || 'Procesando';
                     statusDetail.textContent = req.attentionReason || req.errorMessage || (req.history?.length ? req.history[req.history.length - 1].message : '');
-                    const progress = renderProgress(statusProgress, req.progress);
+                    lastReq = req;
+                    // Only while the request is searching: the next automatic search is a known time
+                    const progress = renderProgress(statusProgress, req.progress, req.status === 'Searching' ? req.nextAttemptUtc : null);
+                    if (releasesContainer.style.display === 'block') renderAutoBox();
 
                     if (req.status === 'Available' && req.localItemId) {
                         btnViewLocal.style.display = 'inline-block';
@@ -1324,6 +1848,7 @@
                     } else {
                         btnRetry.style.display = 'none';
                     }
+                    btnSkipParked.style.display = progress.attention > 0 ? 'inline-block' : 'none';
 
                     // One request per series: more seasons or episodes are added to the one in progress
                     const active = req.status !== 'Failed' && (req.status !== 'Available' || progress.following);
@@ -1345,8 +1870,22 @@
         poll();
     }
 
+    // "hoy a las 18:40" / "mañana a las 09:00" / "12/03 a las 09:00" in local time; null when the time is unknown or past
+    function formatNextAttempt(value, now = new Date()) {
+        if (!value) return null;
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime()) || date.getTime() <= now.getTime()) return null;
+        const pad = (n) => String(n).padStart(2, '0');
+        const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        const days = Math.round((startOfDay(date) - startOfDay(now)) / 86400000);
+        if (days === 0) return `hoy a las ${time}`;
+        if (days === 1) return `mañana a las ${time}`;
+        return `${pad(date.getDate())}/${pad(date.getMonth() + 1)} a las ${time}`;
+    }
+
     // Summary of a request's downloads: counts, the one in progress, what needs attention and a manual-selection hint
-    function renderProgress(container, raw) {
+    function renderProgress(container, raw, nextAttemptUtc) {
         const p = raw || {};
         const num = (a, b) => Number(p[a] ?? p[b] ?? 0) || 0;
         const progress = {
@@ -1355,6 +1894,8 @@
             inProgress: num('inProgress', 'InProgress'),
             pending: num('pending', 'Pending'),
             attention: num('attention', 'Attention'),
+            skipped: num('skipped', 'Skipped'),
+            skippedItems: p.skippedItems || p.SkippedItems || [],
             current: p.current ?? p.Current ?? null,
             items: p.attentionItems || p.AttentionItems || [],
             awaitingSelection: Boolean(p.awaitingSelection ?? p.AwaitingSelection),
@@ -1368,11 +1909,20 @@
             if (progress.inProgress) pieces.push(`${progress.inProgress} en curso${progress.current ? ` (${escapeHtml(progress.current)})` : ''}`);
             if (progress.pending) pieces.push(`${progress.pending} pendiente${progress.pending === 1 ? '' : 's'}`);
             if (progress.attention) pieces.push(`${progress.attention} requiere${progress.attention === 1 ? '' : 'n'} atención`);
+            if (progress.skipped) pieces.push(`${progress.skipped} omitido${progress.skipped === 1 ? '' : 's'}`);
             parts.push(`<div>Descargas: ${pieces.join(' · ')}</div>`);
         }
         if (progress.items.length && progress.total > 1) {
             parts.push('<ul class="acquisition-progress-issues">' + progress.items.map(i =>
                 `<li>${escapeHtml(i.label ?? i.Label ?? '')}: ${escapeHtml(i.reason ?? i.Reason ?? 'requiere revisión')}</li>`).join('') + '</ul>');
+        }
+        if (progress.skippedItems.length && progress.total > 1) {
+            parts.push('<ul class="acquisition-progress-issues acquisition-progress-skipped">' + progress.skippedItems.map(i =>
+                `<li>${escapeHtml(i.label ?? i.Label ?? '')}: ${escapeHtml(i.reason ?? i.Reason ?? 'omitido')}</li>`).join('') + '</ul>');
+        }
+        const nextAttempt = formatNextAttempt(nextAttemptUtc);
+        if (nextAttempt) {
+            parts.push(`<div>Próximo intento: ${escapeHtml(nextAttempt)}.</div>`);
         }
         if (progress.waitingForAir) {
             parts.push(`<div>Esperando emisión: ${escapeHtml(progress.waitingForAir)}.</div>`);

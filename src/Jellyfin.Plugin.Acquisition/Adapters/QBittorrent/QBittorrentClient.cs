@@ -266,6 +266,30 @@ public class QBittorrentClient : IQBittorrentClient
         }
     }
 
+    public async Task<bool> DeleteTorrentsAsync(IReadOnlyCollection<string> hashes, bool deleteFiles, CancellationToken ct = default)
+    {
+        if (hashes.Count == 0) return true;
+
+        try
+        {
+            // Same form on qBittorrent 4.x (/delete) and 5.x
+            using var response = await SendWithAuthAsync(() => new HttpRequestMessage(HttpMethod.Post, BuildUri("api/v2/torrents/delete"))
+            {
+                Content = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    { "hashes", string.Join("|", hashes.Select(h => h.ToLowerInvariant())) },
+                    { "deleteFiles", deleteFiles ? "true" : "false" }
+                })
+            }, ct).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "qBittorrent DeleteTorrents failed");
+            return false;
+        }
+    }
+
     public async Task<List<QBittorrentCategory>> GetCategoriesAsync(CancellationToken ct = default)
     {
         try

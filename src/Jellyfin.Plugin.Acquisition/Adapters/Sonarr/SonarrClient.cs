@@ -177,6 +177,21 @@ public class SonarrClient : ISonarrClient
         return created ?? series;
     }
 
+    public async Task<bool> DeleteSeriesAsync(int id, bool deleteFiles, CancellationToken ct = default)
+    {
+        try
+        {
+            using var req = CreateRequest(HttpMethod.Delete, $"api/v3/series/{id}?deleteFiles={(deleteFiles ? "true" : "false")}&addImportListExclusion=false");
+            using var resp = await _httpClient.SendAsync(req, ct).ConfigureAwait(false);
+            return resp.IsSuccessStatusCode;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Sonarr DeleteSeries failed for ID {Id}", id);
+            return false;
+        }
+    }
+
     public async Task<List<SonarrEpisode>?> GetEpisodesAsync(int seriesId, CancellationToken ct = default)
     {
         try

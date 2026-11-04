@@ -104,6 +104,7 @@ public sealed class ArrRegistrar
 
             var added = await _sonarrClient.AddSeriesAsync(seriesToAdd, ct).ConfigureAwait(false);
             request.ArrId = added.Id;
+            request.ArrAddedByPlugin = true;
             request.RootFolderPath = root;
             request.QualityProfileId = profileId;
             if (!string.IsNullOrEmpty(added.SeriesType)) request.SeriesType = added.SeriesType;
@@ -170,6 +171,7 @@ public sealed class ArrRegistrar
 
             var added = await _radarrClient.AddMovieAsync(movieToAdd, ct).ConfigureAwait(false);
             request.ArrId = added.Id;
+            request.ArrAddedByPlugin = true;
             request.RootFolderPath = root;
             request.QualityProfileId = profileId;
             return RegistrationResult.Registered;

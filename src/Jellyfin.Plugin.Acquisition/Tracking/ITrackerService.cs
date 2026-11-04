@@ -32,9 +32,11 @@ public interface ITrackerService
     Task<RetryResult> RetryRequestAsync(string requestId, Func<AcquisitionRequest, bool> canManage, CancellationToken ct = default);
 
     /// <summary>
-    /// Removes a request that is not yet available and stops tracking it. Torrents already sent to qBittorrent are kept.
+    /// Removes a request that is not yet available and stops tracking it. Torrents already sent to qBittorrent are kept,
+    /// unless <paramref name="deleteDownloads"/> asks to remove (with files) those not yet imported and the title from
+    /// Sonarr/Radarr when the plugin added it and nothing else uses it.
     /// </summary>
-    Task<RetryResult> CancelRequestAsync(string requestId, Func<AcquisitionRequest, bool> canManage, CancellationToken ct = default);
+    Task<RetryResult> CancelRequestAsync(string requestId, Func<AcquisitionRequest, bool> canManage, bool deleteDownloads = false, CancellationToken ct = default);
 
     /// <summary>
     /// Adds seasons or episodes to the active request of a series instead of opening a second one (user decision: one

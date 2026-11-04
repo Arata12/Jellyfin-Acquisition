@@ -1696,7 +1696,7 @@ public class TrackerService : ITrackerService
         });
     }
 
-    public async Task<RetryResult> CancelRequestAsync(string requestId, Func<AcquisitionRequest, bool> canManage, CancellationToken ct = default)
+    public async Task<RetryResult> CancelRequestAsync(string requestId, Func<AcquisitionRequest, bool> canManage, bool deleteDownloads = false, CancellationToken ct = default)
     {
         using (await AcquireLockAsync(requestId, ct).ConfigureAwait(false))
         {
@@ -1720,7 +1720,128 @@ public class TrackerService : ITrackerService
             _cancelledRequests[requestId] = DateTimeOffset.UtcNow;
             await _requestRepo.DeleteAsync(requestId, ct).ConfigureAwait(false);
             _logger.LogInformation("Acquisition request {Id} ({Title}) cancelled", request.Id, request.Title);
+
+            try
+            {
+                await CleanUpAfterCancelAsync(request, deleteDownloads, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The request is already gone; leftovers in qBittorrent/Arr must not turn the cancel into an error
+                _logger.LogWarning(ex, "Could not clean up after cancelling request {Id}", request.Id);
+            }
+
             return new RetryResult(RetryOutcome.Success, request);
+        }
+    }
+
+    /// <summary>
+    /// A series whose episodes were never confirmed was only added to Sonarr to list them: that is always undone.
+    /// With <paramref name="deleteDownloads"/>, torrents not yet imported and the title the plugin added are removed too.
+    /// </summary>
+    private async Task CleanUpAfterCancelAsync(AcquisitionRequest request, bool deleteDownloads, CancellationToken ct)
+    {
+        var unconfirmedSeries = request.Kind == MediaKind.Series && !request.ScopeConfirmed
+            && request.Units.Count == 0 && request.Status == RequestStatus.Pending;
+        if (!deleteDownloads && !unconfirmedSeries) return;
+
+        var others = (await _requestRepo.GetAllAsync(ct).ConfigureAwait(false)).Where(r => r.Id != request.Id).ToList();
+
+        if (deleteDownloads)
+        {
+            await DeleteUnimportedTorrentsAsync(request, others, ct).ConfigureAwait(false);
+        }
+
+        if (request.ArrAddedByPlugin && request.ArrId.HasValue)
+        {
+            await RemoveArrTitleAsync(request, others, checkFiles: !unconfirmedSeries, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Deletes (with files) the torrents of units that were not imported. Torrents of imported units and torrents any
+    /// other request refers to are never touched.
+    /// </summary>
+    private async Task DeleteUnimportedTorrentsAsync(AcquisitionRequest request, List<AcquisitionRequest> others, CancellationToken ct)
+    {
+        var comparer = StringComparer.OrdinalIgnoreCase;
+        var protectedHashes = new HashSet<string>(comparer);
+        foreach (var hash in request.Units.Where(u => u.Status == RequestStatus.Available).Select(u => u.TorrentHash))
+        {
+            if (!string.IsNullOrEmpty(hash)) protectedHashes.Add(hash);
+        }
+
+        foreach (var other in others)
+        {
+            if (!string.IsNullOrEmpty(other.TorrentHash)) protectedHashes.Add(other.TorrentHash);
+            foreach (var hash in other.Units.Select(u => u.TorrentHash))
+            {
+                if (!string.IsNullOrEmpty(hash)) protectedHashes.Add(hash);
+            }
+        }
+
+        var hashes = new HashSet<string>(comparer);
+        var tags = new List<string>();
+        foreach (var unit in request.Units.Where(u => u.Status != RequestStatus.Available))
+        {
+            if (!string.IsNullOrEmpty(unit.TorrentHash)) hashes.Add(unit.TorrentHash);
+            if (!string.IsNullOrEmpty(unit.CorrelationTag)) tags.Add(unit.CorrelationTag);
+        }
+
+        // Requests without units (movies) keep their torrent on the request itself
+        if (request.Units.Count == 0 || request.Status != RequestStatus.Available)
+        {
+            if (!string.IsNullOrEmpty(request.TorrentHash)) hashes.Add(request.TorrentHash);
+        }
+
+        if (request.Units.Count == 0 && !string.IsNullOrEmpty(request.CorrelationTag)) tags.Add(request.CorrelationTag);
+
+        // A torrent added but whose hash was not recorded yet is found by its correlation tag
+        foreach (var tag in tags.Distinct(StringComparer.Ordinal))
+        {
+            foreach (var torrent in await _qbClient.GetTorrentsInfoAsync(tag: tag, ct: ct).ConfigureAwait(false))
+            {
+                if (!string.IsNullOrEmpty(torrent.Hash)) hashes.Add(torrent.Hash);
+            }
+        }
+
+        hashes.ExceptWith(protectedHashes);
+        if (hashes.Count == 0) return;
+
+        if (!await _qbClient.DeleteTorrentsAsync(hashes.ToList(), deleteFiles: true, ct).ConfigureAwait(false))
+        {
+            _logger.LogWarning("qBittorrent did not delete {Count} torrent(s) of cancelled request {Id}", hashes.Count, request.Id);
+        }
+    }
+
+    /// <summary>
+    /// Removes the title the plugin added to Sonarr/Radarr (files untouched, no exclusion) when it has no files and
+    /// no other active request uses it.
+    /// </summary>
+    private async Task RemoveArrTitleAsync(AcquisitionRequest request, List<AcquisitionRequest> others, bool checkFiles, CancellationToken ct)
+    {
+        var arrId = request.ArrId!.Value;
+        if (others.Any(o => o.IsActive && o.Kind == request.Kind && o.ArrId == arrId)) return;
+
+        if (request.Kind == MediaKind.Series)
+        {
+            if (checkFiles)
+            {
+                var episodes = await _sonarrClient.GetEpisodesAsync(arrId, ct).ConfigureAwait(false);
+                if (episodes == null || episodes.Any(e => e.HasFile)) return;
+            }
+
+            await _sonarrClient.DeleteSeriesAsync(arrId, deleteFiles: false, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            if (checkFiles)
+            {
+                var movie = await _radarrClient.GetMovieByIdAsync(arrId, ct).ConfigureAwait(false);
+                if (movie == null || movie.HasFile) return;
+            }
+
+            await _radarrClient.DeleteMovieAsync(arrId, deleteFiles: false, ct).ConfigureAwait(false);
         }
     }
 
@@ -2078,7 +2199,10 @@ public class TrackerService : ITrackerService
                 unit.Status = RequestStatus.Skipped;
             }
 
-            request.AddHistory(request.Status, $"Se omiten {parked.Count} descargas apartadas: {string.Join(", ", parked.Select(u => u.Describe(request.Kind)))}. Puedes volver a pedirlas cuando quieras.");
+            var skippedList = string.Join(", ", parked.Select(u => u.Describe(request.Kind)));
+            request.AddHistory(request.Status, parked.Count == 1
+                ? $"Se omite la descarga apartada: {skippedList}. Puedes volver a pedirla cuando quieras."
+                : $"Se omiten {parked.Count} descargas apartadas: {skippedList}. Puedes volver a pedirlas cuando quieras.");
             ReconcileAfterParkedChange(request);
             await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
             return new RetryResult(RetryOutcome.Success, request);

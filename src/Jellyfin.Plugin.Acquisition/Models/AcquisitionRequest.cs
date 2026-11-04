@@ -40,6 +40,17 @@ public class AcquisitionRequest
     /// </summary>
     public bool AutoReleaseSelection { get; set; }
 
+    /// <summary>
+    /// Poster shown in "Tus solicitudes": the plugin's opaque image path or an http(s) URL (see <see cref="RequestPoster"/>); null for old requests.
+    /// </summary>
+    public string? PosterUrl { get; set; }
+
+    /// <summary>The plugin itself added the series/movie to Sonarr/Radarr for this request (it was not there before).</summary>
+    public bool ArrAddedByPlugin { get; set; }
+
+    /// <summary>The user confirmed which episodes to request (or the request never needed it, e.g. movies and Seerr requests).</summary>
+    public bool ScopeConfirmed { get; set; }
+
     /// <summary>Next time a followed series is checked for newly aired episodes (null = as soon as possible).</summary>
     public DateTimeOffset? NextFollowCheckUtc { get; set; }
 

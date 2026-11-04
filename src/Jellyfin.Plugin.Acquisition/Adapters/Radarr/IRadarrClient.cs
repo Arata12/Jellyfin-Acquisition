@@ -10,6 +10,9 @@ public interface IRadarrClient
     Task<RadarrMovie?> GetMovieByIdAsync(int id, CancellationToken ct = default);
     Task<RadarrMovie?> FindMovieByTmdbIdAsync(int tmdbId, CancellationToken ct = default);
     Task<RadarrMovie> AddMovieAsync(RadarrMovie movie, CancellationToken ct = default);
+
+    /// <summary>Removes a movie from Radarr without import exclusion; false when Radarr refused or was unreachable.</summary>
+    Task<bool> DeleteMovieAsync(int id, bool deleteFiles, CancellationToken ct = default);
     Task<RadarrParseResult?> ParseAsync(string title, CancellationToken ct = default);
     Task<List<RadarrQueueItem>?> GetQueueAsync(CancellationToken ct = default);
     Task<List<RadarrHistoryItem>> GetHistoryAsync(string? downloadId = null, CancellationToken ct = default);

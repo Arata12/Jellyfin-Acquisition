@@ -178,6 +178,21 @@ public class RadarrClient : IRadarrClient
         return created ?? movie;
     }
 
+    public async Task<bool> DeleteMovieAsync(int id, bool deleteFiles, CancellationToken ct = default)
+    {
+        try
+        {
+            using var req = CreateRequest(HttpMethod.Delete, $"api/v3/movie/{id}?deleteFiles={(deleteFiles ? "true" : "false")}&addImportExclusion=false");
+            using var resp = await _httpClient.SendAsync(req, ct).ConfigureAwait(false);
+            return resp.IsSuccessStatusCode;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Radarr DeleteMovie failed for ID {Id}", id);
+            return false;
+        }
+    }
+
     public async Task<RadarrParseResult?> ParseAsync(string title, CancellationToken ct = default)
     {
         try

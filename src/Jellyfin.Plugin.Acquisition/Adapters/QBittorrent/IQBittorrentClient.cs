@@ -15,4 +15,7 @@ public interface IQBittorrentClient
 
     /// <summary>Deletes tags from qBittorrent (and from every torrent that has them). Torrents are kept.</summary>
     Task<bool> DeleteTagsAsync(IReadOnlyCollection<string> tags, CancellationToken ct = default);
+
+    /// <summary>Removes torrents from qBittorrent, optionally with their downloaded files.</summary>
+    Task<bool> DeleteTorrentsAsync(IReadOnlyCollection<string> hashes, bool deleteFiles, CancellationToken ct = default);
 }

@@ -878,3 +878,141 @@
         width: 100%;
     }
 }
+
+/* Tus solicitudes: empty state, cards that wait for the user */
+.acquisition-empty-text {
+    margin: 0;
+    color: var(--acq-text-secondary);
+}
+
+.acquisition-card.needs-action .acquisition-card-image-box {
+    box-shadow: 0 0 0 2px #ff9800;
+}
+
+/* Header button with the number of requests that need action */
+.acquisition-header-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    color: inherit;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.acquisition-header-btn:hover,
+.acquisition-header-btn:focus-visible {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.acquisition-header-badge {
+    position: absolute;
+    top: 6px;
+    right: 4px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    box-sizing: border-box;
+    border-radius: 9px;
+    background: #d83b01;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+    pointer-events: none;
+}
+
+/* Small notice at the bottom of the screen */
+.acquisition-toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 100000;
+    max-width: min(92vw, 420px);
+    box-sizing: border-box;
+    padding: 12px 18px;
+    border-radius: var(--acq-radius);
+    background: var(--acq-modal-bg);
+    color: var(--acq-text);
+    border: 1px solid rgba(var(--acq-accent), 0.35);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+    -webkit-backdrop-filter: blur(var(--acq-blur));
+    backdrop-filter: blur(var(--acq-blur));
+    font-size: 0.95em;
+    cursor: pointer;
+}
+
+/* "Serie completa" summary and the cancel confirmation inside the modal */
+.acquisition-scope-summary {
+    margin: 0 0 14px 0;
+    padding: 8px 12px;
+    border-radius: calc(var(--acq-radius) * 0.66);
+    background: rgba(var(--acq-accent), 0.12);
+    color: var(--acq-text);
+    font-size: 0.9em;
+}
+
+.acquisition-cancel-confirm {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: calc(var(--acq-radius) * 0.66);
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.acquisition-cancel-title {
+    margin: 0 0 8px 0;
+    font-weight: 600;
+}
+
+.acquisition-cancel-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 12px;
+    cursor: pointer;
+}
+
+.acquisition-cancel-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.acquisition-auto-select {
+    margin-bottom: 12px;
+}
+
+.acquisition-auto-select .acquisition-field-hint {
+    display: block;
+    margin: 6px 0 0 0;
+}
+
+.acquisition-link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    color: rgb(var(--acq-accent));
+    text-decoration: underline;
+    cursor: pointer;
+    font-size: inherit;
+}
+
+.acquisition-progress-skipped {
+    color: var(--acq-text-secondary);
+}
+
+@media (max-width: 600px) {
+    .acquisition-cancel-actions > button {
+        flex: 1 1 auto;
+    }
+}

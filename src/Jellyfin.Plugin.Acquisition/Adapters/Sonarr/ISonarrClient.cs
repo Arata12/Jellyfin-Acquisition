@@ -9,6 +9,9 @@ public interface ISonarrClient
     Task<SonarrSeries?> GetSeriesByIdAsync(int id, CancellationToken ct = default);
     Task<SonarrSeries?> FindSeriesByTvdbIdAsync(int tvdbId, CancellationToken ct = default);
     Task<SonarrSeries> AddSeriesAsync(SonarrSeries series, CancellationToken ct = default);
+
+    /// <summary>Removes a series from Sonarr without import list exclusion; false when Sonarr refused or was unreachable.</summary>
+    Task<bool> DeleteSeriesAsync(int id, bool deleteFiles, CancellationToken ct = default);
     Task<List<SonarrEpisode>?> GetEpisodesAsync(int seriesId, CancellationToken ct = default);
     Task<SonarrParseResult?> ParseAsync(string title, CancellationToken ct = default);
     Task<List<SonarrQueueItem>?> GetQueueAsync(CancellationToken ct = default);

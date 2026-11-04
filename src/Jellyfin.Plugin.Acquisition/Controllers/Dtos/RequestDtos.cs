@@ -33,6 +33,10 @@ public class CreateRequestDto
     /// </summary>
     [JsonPropertyName("destinationName")]
     public string? DestinationName { get; set; }
+
+    /// <summary>Poster of the catalog item (opaque image path); validated on the server before it is stored.</summary>
+    [JsonPropertyName("posterUrl")]
+    public string? PosterUrl { get; set; }
 }
 
 public class ScopeConfirmationDto
@@ -225,6 +229,10 @@ public class AcquisitionRequestDto
     [JsonPropertyName("autoReleaseSelection")]
     public bool AutoReleaseSelection { get; set; }
 
+    /// <summary>The server asks for a manual choice of release (global setting); the request can still opt out with <see cref="AutoReleaseSelection"/>.</summary>
+    [JsonPropertyName("manualReleaseMode")]
+    public bool ManualReleaseMode { get; set; }
+
     [JsonPropertyName("progress")]
     public RequestProgressDto Progress { get; set; } = new();
 }
@@ -283,4 +291,75 @@ public class UnitIssueDto
 
     [JsonPropertyName("reason")]
     public string? Reason { get; set; }
+}
+
+/// <summary>Row of "Tus solicitudes".</summary>
+public class RequestSummaryDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("kind")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public MediaKind Kind { get; set; }
+
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    [JsonPropertyName("year")]
+    public int? Year { get; set; }
+
+    [JsonPropertyName("posterUrl")]
+    public string? PosterUrl { get; set; }
+
+    [JsonPropertyName("providerIds")]
+    public ProviderIds ProviderIds { get; set; } = new();
+
+    [JsonPropertyName("status")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public RequestStatus Status { get; set; }
+
+    [JsonPropertyName("progress")]
+    public RequestSummaryProgressDto Progress { get; set; } = new();
+
+    /// <summary>The user has to do something: choose a release or review downloads set aside.</summary>
+    [JsonPropertyName("needsAction")]
+    public bool NeedsAction { get; set; }
+
+    [JsonPropertyName("createdAt")]
+    public DateTimeOffset CreatedAt { get; set; }
+
+    [JsonPropertyName("updatedAt")]
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>User name of the requester; only filled for administrators.</summary>
+    [JsonPropertyName("requestedBy")]
+    public string? RequestedBy { get; set; }
+}
+
+public class RequestSummaryProgressDto
+{
+    [JsonPropertyName("total")]
+    public int Total { get; set; }
+
+    [JsonPropertyName("available")]
+    public int Available { get; set; }
+
+    [JsonPropertyName("attention")]
+    public int Attention { get; set; }
+
+    [JsonPropertyName("awaitingSelection")]
+    public bool AwaitingSelection { get; set; }
+
+    [JsonPropertyName("following")]
+    public bool Following { get; set; }
+
+    [JsonPropertyName("waitingForAir")]
+    public string? WaitingForAir { get; set; }
+}
+
+public class AttentionCountDto
+{
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
 }

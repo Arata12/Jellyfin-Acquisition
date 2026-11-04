@@ -329,6 +329,7 @@ public class SeerrBridge : ISeerrBridge
         string title;
         int year;
         ProviderIds ids;
+        string? poster;
 
         if (kind == MediaKind.Movie)
         {
@@ -342,6 +343,7 @@ public class SeerrBridge : ISeerrBridge
                         ?? throw new SeerrApiException(StatusCodes.Status404NotFound, "Radarr no encontró la película.");
             title = movie.Title;
             year = movie.Year;
+            poster = PosterOf(movie.Images.FirstOrDefault(i => Is(i.CoverType, "poster"))?.RemoteUrl);
             ids = new ProviderIds { Tmdb = movie.TmdbId.ToString(CultureInfo.InvariantCulture), Imdb = movie.ImdbId };
         }
         else
@@ -360,6 +362,7 @@ public class SeerrBridge : ISeerrBridge
 
             title = series.Title;
             year = series.Year;
+            poster = PosterOf(series.Images.FirstOrDefault(i => Is(i.CoverType, "poster"))?.RemoteUrl);
             ids = new ProviderIds
             {
                 Tvdb = series.TvdbId.ToString(CultureInfo.InvariantCulture),
@@ -443,6 +446,9 @@ public class SeerrBridge : ISeerrBridge
             Scope = scope,
             FollowAiring = kind == MediaKind.Series && scope.All,
             AutoReleaseSelection = true,
+            // The client already chose the seasons; there is no scope picker to confirm
+            ScopeConfirmed = true,
+            PosterUrl = poster,
             DestinationId = destination.Id,
             DestinationName = destination.Name,
             RootFolderPath = destination.RootFolderPath,
@@ -657,6 +663,13 @@ public class SeerrBridge : ISeerrBridge
 
         var opaqueId = _catalogService.RegisterImage(remoteUrl);
         return opaqueId == null ? null : "/" + opaqueId;
+    }
+
+    /// <summary>Opaque image path stored on a request as its poster; null when the image cannot be registered.</summary>
+    private string? PosterOf(string? remoteUrl)
+    {
+        var opaqueId = _catalogService.RegisterImage(remoteUrl);
+        return opaqueId == null ? null : RequestPoster.Sanitize($"/Acquisition/images/{opaqueId}");
     }
 
     /// <summary>"/Acquisition/images/{id}" of a catalog result as an image-proxy path.</summary>
