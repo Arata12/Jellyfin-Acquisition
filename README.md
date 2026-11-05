@@ -134,6 +134,20 @@ Los colores y medidas se pueden ajustar desde **Panel de control → General →
 
 Si usas Abyss, carga una versión fija del tema (un commit concreto) en lugar de `@main`, para que el CSS no cambie sin que lo revises.
 
+### Tema Jellyfind (opcional)
+
+El repositorio incluye un tema para Jellyfin Web 12.x inspirado en la interfaz de plezy, en [`theme/jellyfind.css`](theme/jellyfind.css). Tiene fondo casi negro, el blanco como único acento (botón «Reproducir» en píldora blanca, vista activa blanca) y chips y botones redondeados. En la ficha de un título, la imagen de fondo y el logo hacen de portada y no se muestra el póster. También ajusta los colores del plugin para que el buscador y los modales encajen.
+
+Para usarlo, pon esto en **Panel de control → General → CSS personalizado**, en lugar de otro tema:
+
+```css
+@import url("https://cdn.jsdelivr.net/gh/Arata12/Jellyfin-Acquisition@main/theme/jellyfind.css");
+```
+
+- jsDelivr guarda en caché la rama `main` unas horas. Para que no cambie sin que lo revises, cambia `@main` por un commit concreto.
+- Se puede ajustar con variables después del `@import`, por ejemplo `:root { --jfd-accent: 255 200 80; --jfd-radius: 14px; }` (los colores van como `R G B`, sin comas).
+- El panel de control de Jellyfin no carga el CSS personalizado, así que se queda con su estilo.
+
 ## Uso
 
 - **Pedir algo nuevo:** busca en Jellyfin, abre una tarjeta de «Fuera de tu biblioteca», elige destino y pulsa «Añadir a biblioteca». En series puedes pedir la serie completa o elegir episodios.

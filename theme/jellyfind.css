@@ -1,0 +1,874 @@
+/*
+ * Jellyfind — tema para Jellyfin Web 12.x inspirado en la interfaz de plezy.
+ * Fondo casi negro, sin color de acento: el blanco hace de acento (botón principal en píldora
+ * blanca, pestaña activa blanca), superficies grises redondeadas y pósters con esquinas suaves.
+ *
+ * Uso (Panel de control → General → CSS personalizado):
+ *   @import url("https://cdn.jsdelivr.net/gh/Arata12/Jellyfin-Acquisition@main/theme/jellyfind.css");
+ *
+ * Ajustes: redefine las variables --jfd-* después del @import, por ejemplo
+ *   :root { --jfd-accent: 255 255 255; --jfd-radius: 12px; }
+ */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+
+:root {
+    --jfd-bg: 13 13 15;              /* fondo de la página */
+    --jfd-surface: 24 24 27;         /* paneles, menús y diálogos */
+    --jfd-surface-2: 34 34 38;       /* chips, botones secundarios, campos */
+    --jfd-surface-3: 46 46 52;       /* hover */
+    --jfd-text: 244 244 245;
+    --jfd-text-2: 161 161 170;
+    --jfd-accent: 255 255 255;       /* botón principal y elemento activo */
+    --jfd-on-accent: 13 13 15;       /* texto sobre el acento */
+    --jfd-radius: 10px;              /* pósters y tarjetas */
+    --jfd-radius-lg: 18px;           /* diálogos y paneles */
+    --jfd-font: "Inter", "Segoe UI", Roboto, system-ui, sans-serif;
+    --jfd-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+
+    /* Estilo del plugin Jellyfind (buscador y solicitudes) */
+    --acquisition-accent: 255, 255, 255;
+    --acquisition-on-accent: rgb(var(--jfd-on-accent));
+    --acquisition-radius: 14px;
+    --acquisition-surface: 24, 24, 27;
+}
+
+/* Paleta de los componentes MUI de Jellyfin 12 (cabecera, panel de control, menús).
+   Jellyfin la declara en ":root, [data-theme]" y se carga después: "html:root" gana por especificidad. */
+html:root {
+    --jf-palette-primary-main: rgb(var(--jfd-accent));
+    --jf-palette-primary-light: rgb(var(--jfd-accent));
+    --jf-palette-primary-dark: rgb(var(--jfd-accent) / 0.86);
+    --jf-palette-primary-contrastText: rgb(var(--jfd-on-accent));
+    --jf-palette-primary-mainChannel: var(--jfd-accent);
+    --jf-palette-primary-lightChannel: var(--jfd-accent);
+    --jf-palette-primary-darkChannel: var(--jfd-accent);
+    --jf-palette-primary-contrastTextChannel: var(--jfd-on-accent);
+    --jf-palette-background-default: rgb(var(--jfd-bg));
+    --jf-palette-background-defaultChannel: var(--jfd-bg);
+    --jf-palette-background-paper: rgb(var(--jfd-surface));
+    --jf-palette-background-paperChannel: var(--jfd-surface);
+    --jf-palette-AppBar-defaultBg: rgb(var(--jfd-bg));
+    --jf-palette-text-primary: rgb(var(--jfd-text));
+    --jf-palette-text-secondary: rgb(var(--jfd-text-2));
+    --jf-palette-text-primaryChannel: var(--jfd-text);
+    --jf-palette-text-secondaryChannel: var(--jfd-text-2);
+    --jf-palette-divider: rgb(255 255 255 / 0.08);
+    --jf-palette-SnackbarContent-bg: rgb(var(--jfd-accent));
+    --jf-palette-SnackbarContent-color: rgb(var(--jfd-on-accent));
+    --jf-shape-borderRadius: 12px;
+}
+
+.MuiButton-contained,
+.MuiButton-containedPrimary {
+    border-radius: 999px !important;
+    box-shadow: none !important;
+    text-transform: none !important;
+    font-weight: 600 !important;
+}
+
+.MuiCard-root,
+.MuiPaper-root.MuiPaper-outlined {
+    border-radius: 14px !important;
+}
+
+/* ---------- Base ---------- */
+
+/* Solo html y la capa de fondo: un fondo en body taparía las imágenes de fondo (están en z-index -1) */
+html,
+.backgroundContainer {
+    background-color: rgb(var(--jfd-bg)) !important;
+}
+
+body,
+.skinBody {
+    background-color: transparent !important;
+}
+
+/* Con fondo (ficha de un título): la imagen se ve arriba y se funde con el negro hacia abajo y a la izquierda */
+.backgroundContainer.withBackdrop {
+    background-color: transparent !important;
+    background-image:
+        linear-gradient(to right, rgb(var(--jfd-bg) / 0.85) 0%, rgb(var(--jfd-bg) / 0.35) 45%, transparent 75%),
+        linear-gradient(to bottom, rgb(var(--jfd-bg) / 0.15) 0%, rgb(var(--jfd-bg) / 0.35) 30%, rgb(var(--jfd-bg) / 0.9) 58%, rgb(var(--jfd-bg)) 75%) !important;
+}
+
+html,
+body,
+.skinBody,
+button,
+input,
+select,
+textarea,
+.MuiTypography-root,
+.MuiButton-root,
+.emby-button {
+    font-family: var(--jfd-font) !important;
+}
+
+body {
+    color: rgb(var(--jfd-text));
+    -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+    background: rgb(var(--jfd-accent) / 0.85);
+    color: rgb(var(--jfd-on-accent));
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--jfd-surface-3)) transparent;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgb(var(--jfd-surface-3));
+    border-radius: 99px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* ---------- Cabecera ---------- */
+
+.skinHeader,
+.skinHeader.skinHeader-withBackground {
+    background: linear-gradient(to bottom, rgb(var(--jfd-bg) / 0.92), rgb(var(--jfd-bg) / 0.72)) !important;
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+    backdrop-filter: blur(18px) saturate(1.2);
+    box-shadow: none !important;
+    border-bottom: 1px solid rgb(255 255 255 / 0.04);
+}
+
+/* Sobre el fondo de una ficha la cabecera es transparente, como en plezy */
+.itemDetailPage:not(.hide) ~ .skinHeader,
+.skinHeader.semiTransparent {
+    background: linear-gradient(to bottom, rgb(0 0 0 / 0.55), transparent) !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border-bottom-color: transparent;
+}
+
+.MuiAppBar-root {
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.MuiAppBar-root .MuiButton-root {
+    border-radius: 999px !important;
+    text-transform: none !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+    color: rgb(var(--jfd-text-2)) !important;
+    padding: 6px 14px !important;
+    min-height: 36px;
+    transition: background-color 0.2s var(--jfd-ease), color 0.2s var(--jfd-ease);
+}
+
+.MuiAppBar-root .MuiButton-root:hover {
+    background: rgb(var(--jfd-surface-2)) !important;
+    color: rgb(var(--jfd-text)) !important;
+}
+
+/* Vista activa: píldora blanca */
+.MuiAppBar-root .MuiButton-root.MuiButton-colorPrimary {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+}
+
+/* Grupos de botones de la barra de una biblioteca: sin separadores entre píldoras */
+.MuiButtonGroup-root,
+.MuiButtonGroup-grouped,
+.MuiButtonGroup-root .MuiButton-root {
+    border-color: transparent !important;
+    box-shadow: none !important;
+}
+
+.MuiButtonGroup-root {
+    gap: 4px;
+}
+
+.MuiButtonGroup-grouped {
+    border-radius: 999px !important;
+    min-width: 36px !important;
+}
+
+/* Nombre del servidor / logo */
+.MuiAppBar-root .MuiButton-sizeLarge {
+    color: rgb(var(--jfd-text)) !important;
+    font-weight: 800 !important;
+    font-size: 1.05rem !important;
+}
+
+.MuiAppBar-root .MuiButton-sizeLarge:hover {
+    background: transparent !important;
+}
+
+.MuiAppBar-root .MuiIconButton-root,
+.skinHeader .headerButton,
+.acquisition-header-btn {
+    color: rgb(var(--jfd-text)) !important;
+    border-radius: 999px !important;
+    transition: background-color 0.2s var(--jfd-ease);
+}
+
+.MuiAppBar-root .MuiIconButton-root:hover,
+.skinHeader .headerButton:hover {
+    background: rgb(var(--jfd-surface-2)) !important;
+}
+
+.MuiAppBar-root .MuiAvatar-root {
+    background: rgb(var(--jfd-surface-3)) !important;
+    color: rgb(var(--jfd-text)) !important;
+}
+
+/* Pestañas bajo la cabecera (Inicio, Sugerencias, Géneros…): chips en píldora */
+.headerTabs .emby-tabs-slider,
+.tabs-viewmenubar .emby-tabs-slider {
+    display: flex;
+    gap: 8px;
+    padding: 6px 0 10px;
+}
+
+.emby-tab-button {
+    border-radius: 999px !important;
+    background: rgb(var(--jfd-surface-2)) !important;
+    color: rgb(var(--jfd-text)) !important;
+    font-weight: 500 !important;
+    font-size: 0.92rem !important;
+    padding: 0.55em 1.15em !important;
+    text-transform: none !important;
+    transition: background-color 0.2s var(--jfd-ease), color 0.2s var(--jfd-ease);
+}
+
+.emby-tab-button:hover {
+    background: rgb(var(--jfd-surface-3)) !important;
+}
+
+.emby-tab-button.emby-tab-button-active,
+.emby-tab-button-active {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+    font-weight: 600 !important;
+}
+
+.emby-tab-button-active::after,
+.emby-tab-button .emby-button-foreground::after {
+    display: none !important;
+}
+
+/* ---------- Menú lateral ---------- */
+
+.mainDrawer,
+.MuiDrawer-paper {
+    background: rgb(var(--jfd-surface)) !important;
+    border-right: 1px solid rgb(255 255 255 / 0.05) !important;
+}
+
+.navMenuOption,
+.MuiDrawer-paper .MuiListItemButton-root {
+    border-radius: 999px !important;
+    margin: 2px 10px !important;
+    padding-left: 14px !important;
+    color: rgb(var(--jfd-text)) !important;
+}
+
+.navMenuOption:hover,
+.MuiDrawer-paper .MuiListItemButton-root:hover {
+    background: rgb(var(--jfd-surface-2)) !important;
+}
+
+.navMenuOption-selected,
+.MuiDrawer-paper .MuiListItemButton-root.Mui-selected {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+}
+
+.navMenuOption-selected .material-icons,
+.MuiDrawer-paper .Mui-selected .MuiListItemIcon-root {
+    color: rgb(var(--jfd-on-accent)) !important;
+}
+
+.sidebarHeader,
+.MuiDrawer-paper .MuiListSubheader-root {
+    color: rgb(var(--jfd-text-2)) !important;
+    background: transparent !important;
+    text-transform: uppercase;
+    font-size: 0.72rem !important;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+}
+
+/* ---------- Secciones y tarjetas ---------- */
+
+.sectionTitle,
+.sectionTitle-cards {
+    font-weight: 600 !important;
+    font-size: 1.3rem !important;
+    letter-spacing: -0.01em;
+    color: rgb(var(--jfd-text)) !important;
+}
+
+.sectionTitleContainer .sectionTitleTextButton .material-icons,
+.sectionTitle .material-icons {
+    color: rgb(var(--jfd-text-2));
+}
+
+.cardScalable,
+.cardContent,
+.cardImageContainer,
+.cardOverlayContainer,
+.cardScalable img,
+.cardImage,
+.blurhash-canvas {
+    border-radius: var(--jfd-radius) !important;
+}
+
+.cardScalable {
+    background: rgb(var(--jfd-surface)) !important;
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.04);
+    overflow: hidden;
+}
+
+.cardContent-shadow,
+.cardBox-focustransform {
+    box-shadow: none !important;
+}
+
+.card-hoverable:hover .cardScalable,
+.card:focus .cardScalable {
+    box-shadow: 0 0 0 2px rgb(var(--jfd-accent) / 0.9);
+}
+
+.cardBox,
+.card:focus .cardBox.visualCardBox,
+.card:focus .cardBox:not(.visualCardBox) .cardScalable {
+    border: 0 !important;
+}
+
+.card:focus .cardBox:not(.visualCardBox) .cardScalable {
+    border: 0 !important;
+}
+
+.cardOverlayContainer {
+    background: linear-gradient(to top, rgb(0 0 0 / 0.65), rgb(0 0 0 / 0.1) 60%) !important;
+}
+
+.cardOverlayButton,
+.cardOverlayFab-primary {
+    border-radius: 999px !important;
+}
+
+.cardOverlayFab-primary {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+}
+
+.cardText,
+.cardText-first {
+    font-weight: 500;
+    color: rgb(var(--jfd-text)) !important;
+}
+
+.cardText-secondary,
+.cardText:not(.cardText-first) {
+    color: rgb(var(--jfd-text-2)) !important;
+    font-size: 0.82em;
+}
+
+.cardFooter,
+.cardFooter .cardText {
+    text-align: left !important;
+    padding-left: 2px;
+}
+
+/* Contadores de no vistos: círculo blanco con número oscuro */
+.countIndicator,
+.indicator.countIndicator,
+.playedIndicator,
+.indicator {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+    font-weight: 700 !important;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.45);
+}
+
+.playedIndicator .material-icons,
+.indicator .material-icons,
+.indicatorIcon {
+    color: rgb(var(--jfd-on-accent)) !important;
+}
+
+/* Barras de progreso finas y blancas */
+.itemProgressBar,
+.cardProgressBar,
+.innerCardFooter .itemProgressBar {
+    background: rgb(255 255 255 / 0.22) !important;
+    height: 4px !important;
+    border-radius: 99px;
+    overflow: hidden;
+}
+
+.itemProgressBarForeground {
+    background: rgb(var(--jfd-accent)) !important;
+    border-radius: 99px;
+}
+
+.innerCardFooter {
+    background: transparent !important;
+}
+
+/* Tarjetas de bibliotecas (Mis contenidos) */
+.overflowBackdropCard .cardImageContainer .cardText,
+.backdropCard .cardTextCentered {
+    font-weight: 700;
+}
+
+/* ---------- Ficha de serie o película ---------- */
+
+/* Sin póster: la imagen de fondo y el logo hacen de portada, como en plezy */
+.itemDetailPage .detailImageContainer {
+    display: none !important;
+}
+
+.itemDetailPage .detailRibbon,
+.itemDetailPage .detailPagePrimaryContent {
+    padding-left: 3.3% !important;
+    padding-right: 3.3% !important;
+}
+
+.itemDetailPage .detailPageWrapperContainer {
+    background: linear-gradient(to bottom, transparent, rgb(var(--jfd-bg)) 160px) !important;
+}
+
+.itemDetailPage .detailPagePrimaryContainer,
+.itemDetailPage .detailPageSecondaryContainer {
+    background: transparent !important;
+}
+
+.layout-desktop .itemDetailPage .itemBackdrop,
+.layout-tv .itemDetailPage .itemBackdrop {
+    height: 50vh !important;
+}
+
+.layout-desktop .itemDetailPage .detailLogo,
+.layout-tv .itemDetailPage .detailLogo {
+    left: 3.3% !important;
+    right: auto !important;
+    top: calc(50vh - 270px) !important;
+    width: min(460px, 38vw) !important;
+    height: 150px !important;
+    background-position: left bottom !important;
+    transform: none !important;
+}
+
+.itemBackdrop::after {
+    display: none !important;
+}
+
+/* Escritorio: título, datos y botones apilados a la izquierda */
+.layout-desktop .itemDetailPage .detailRibbon,
+.layout-tv .itemDetailPage .detailRibbon {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 18px;
+    height: auto !important;
+    min-height: 0 !important;
+    padding-bottom: 8px !important;
+}
+
+.layout-desktop .itemDetailPage .mainDetailButtons,
+.layout-tv .itemDetailPage .mainDetailButtons {
+    margin: 0 !important;
+    justify-content: flex-start !important;
+}
+
+/* Móvil: la imagen ocupa media pantalla y el título se monta sobre su parte baja */
+.layout-mobile .itemDetailPage .itemBackdrop {
+    height: 56vh !important;
+    background-position: center 20% !important;
+    -webkit-mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
+}
+
+.layout-mobile .itemDetailPage .detailRibbon {
+    margin-top: -110px !important;
+    padding-top: 0 !important;
+}
+
+.layout-mobile .itemDetailPage .infoWrapper {
+    padding-left: 0 !important;
+}
+
+.layout-mobile .itemDetailPage .nameContainer,
+.layout-mobile .itemDetailPage .itemName,
+.layout-mobile .itemDetailPage .itemMiscInfo {
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+
+.layout-mobile .itemDetailPage .itemName.parentNameLast {
+    font-size: 1.9rem !important;
+    line-height: 1.15;
+    text-shadow: 0 2px 16px rgb(0 0 0 / 0.6);
+}
+
+.layout-mobile .itemDetailPage .mainDetailButtons {
+    justify-content: space-between !important;
+    gap: 10px 0;
+}
+
+.layout-mobile .itemDetailPage .mainDetailButtons .btnPlay,
+.layout-mobile .itemDetailPage .mainDetailButtons .btnResume {
+    flex: 1 1 100%;
+    height: 50px;
+    justify-content: center;
+}
+
+.detailRibbon {
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.itemName.infoText,
+.detailRibbon .itemName {
+    font-weight: 800 !important;
+    letter-spacing: -0.02em;
+}
+
+.itemName.originalTitle {
+    font-weight: 500 !important;
+    color: rgb(var(--jfd-text-2)) !important;
+}
+
+/* Metadatos (año, clasificación, nota…) como chips */
+.detailRibbon .itemMiscInfo {
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.detailRibbon .itemMiscInfo .mediaInfoItem {
+    background: rgb(var(--jfd-surface-2) / 0.85);
+    border: 1px solid rgb(255 255 255 / 0.06);
+    border-radius: 999px;
+    padding: 0.25em 0.8em;
+    margin: 0 !important;
+    font-size: 0.85em;
+    font-weight: 500;
+}
+
+.detailRibbon .mediaInfoOfficialRating {
+    border: 1px solid rgb(255 255 255 / 0.06) !important;
+}
+
+.starIcon {
+    color: #f5c518 !important;
+}
+
+/* Botones: el de reproducir es una píldora blanca con texto, el resto círculos grises */
+.mainDetailButtons {
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.mainDetailButtons .detailButton {
+    margin: 0 !important;
+    width: 46px;
+    height: 46px;
+    padding: 0 !important;
+    border-radius: 999px !important;
+    background: rgb(var(--jfd-surface-2) / 0.9) !important;
+    border: 1px solid rgb(255 255 255 / 0.06);
+    color: rgb(var(--jfd-text)) !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s var(--jfd-ease), transform 0.2s var(--jfd-ease);
+}
+
+.mainDetailButtons .detailButton:hover {
+    background: rgb(var(--jfd-surface-3)) !important;
+}
+
+.mainDetailButtons .detailButton:active {
+    transform: scale(0.96);
+}
+
+.mainDetailButtons .detailButton-content {
+    display: inline-flex !important;
+    flex-direction: row !important;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.mainDetailButtons .detailButton-icon {
+    font-size: 1.45em !important;
+    color: inherit !important;
+}
+
+.mainDetailButtons .btnPlay,
+.mainDetailButtons .btnResume {
+    width: auto !important;
+    padding: 0 22px 0 16px !important;
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+    border-color: transparent;
+}
+
+.mainDetailButtons .btnPlay:hover,
+.mainDetailButtons .btnResume:hover {
+    background: rgb(var(--jfd-accent) / 0.86) !important;
+}
+
+.mainDetailButtons .btnPlay .detailButton-content::after {
+    content: "Reproducir";
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+.mainDetailButtons .btnResume .detailButton-content::after {
+    content: "Continuar";
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+/* Un botón activo (visto, favorito) queda relleno */
+.mainDetailButtons .btnPlaystate .playstatebutton-icon-played,
+.mainDetailButtons .btnUserRating .ratingbutton-icon-withrating {
+    color: #ff5a6a !important;
+}
+
+.mainDetailButtons .btnPlaystate .playstatebutton-icon-played {
+    color: #4ade80 !important;
+}
+
+/* Sinopsis y datos */
+.overview,
+.detailSectionContent .overview {
+    color: rgb(var(--jfd-text) / 0.86) !important;
+    line-height: 1.6;
+    font-size: 1rem;
+}
+
+.itemGenres,
+.itemTags,
+.itemDetailsGroup {
+    color: rgb(var(--jfd-text-2));
+}
+
+.itemTags .button-link,
+.itemExternalLinks .button-link,
+.itemDetailsGroup a {
+    color: rgb(var(--jfd-text)) !important;
+    font-weight: 500;
+}
+
+.overview-expand {
+    border-radius: 999px !important;
+    background: rgb(var(--jfd-surface-2)) !important;
+}
+
+/* Episodios */
+.listItem,
+.listItem-border {
+    border-radius: 14px !important;
+    border: 0 !important;
+}
+
+.listItem:hover,
+.listItem:focus {
+    background: rgb(var(--jfd-surface)) !important;
+}
+
+.listItemImage,
+.listItemImage-large {
+    border-radius: 10px !important;
+    overflow: hidden;
+}
+
+.listItemBodyText.secondary,
+.secondary {
+    color: rgb(var(--jfd-text-2)) !important;
+}
+
+/* Selector de temporadas/versiones de la ficha */
+.detailSelectContainer .selectContainer select,
+.selectSource,
+.selectAudio,
+.selectSubtitles,
+.selectVideo {
+    border-radius: 999px !important;
+}
+
+/* ---------- Controles generales ---------- */
+
+.emby-button.raised,
+.raised {
+    background: rgb(var(--jfd-surface-2)) !important;
+    color: rgb(var(--jfd-text)) !important;
+    border-radius: 999px !important;
+    box-shadow: none !important;
+}
+
+.emby-button.raised:hover {
+    background: rgb(var(--jfd-surface-3)) !important;
+}
+
+.button-submit,
+.emby-button.button-submit,
+.btnSubmit {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+    font-weight: 700 !important;
+}
+
+.button-submit:hover,
+.emby-button.button-submit:hover {
+    background: rgb(var(--jfd-accent) / 0.86) !important;
+}
+
+.emby-input,
+.emby-textarea,
+.emby-select,
+.emby-select-withcolor,
+.searchfields-txtSearch,
+.MuiOutlinedInput-root {
+    background: rgb(var(--jfd-surface-2)) !important;
+    border: 1px solid rgb(255 255 255 / 0.06) !important;
+    border-radius: 12px !important;
+    color: rgb(var(--jfd-text)) !important;
+}
+
+.emby-input:focus,
+.emby-textarea:focus,
+.emby-select:focus,
+.searchfields-txtSearch:focus {
+    border-color: rgb(var(--jfd-accent) / 0.7) !important;
+    box-shadow: 0 0 0 3px rgb(var(--jfd-accent) / 0.12);
+}
+
+.MuiOutlinedInput-notchedOutline {
+    border-color: transparent !important;
+}
+
+.inputLabelFocused,
+.selectLabelFocused,
+.textareaLabelFocused {
+    color: rgb(var(--jfd-text)) !important;
+}
+
+.emby-checkbox:checked + span + .checkboxOutline,
+.emby-checkbox:checked + .checkboxOutline {
+    background: rgb(var(--jfd-accent)) !important;
+    border-color: rgb(var(--jfd-accent)) !important;
+}
+
+.emby-checkbox:checked + span + .checkboxOutline .checkboxIcon-checked,
+.emby-checkbox:checked + .checkboxOutline .checkboxIcon-checked {
+    color: rgb(var(--jfd-on-accent)) !important;
+}
+
+.emby-collapse-expandIcon,
+a,
+.button-link {
+    color: rgb(var(--jfd-text));
+}
+
+/* Diálogos, menús y hojas de acción */
+.dialog,
+.actionSheet,
+.MuiPaper-root.MuiDialog-paper,
+.MuiPaper-root.MuiMenu-paper,
+.MuiPopover-paper {
+    background: rgb(var(--jfd-surface)) !important;
+    border: 1px solid rgb(255 255 255 / 0.06);
+    border-radius: var(--jfd-radius-lg) !important;
+    box-shadow: 0 24px 60px rgb(0 0 0 / 0.55) !important;
+}
+
+.dialog.dialog-fullscreen {
+    border-radius: 0 !important;
+    border: 0;
+}
+
+.actionSheetMenuItem,
+.MuiMenuItem-root {
+    border-radius: 10px !important;
+    margin: 0 6px;
+}
+
+.actionSheetMenuItem:hover,
+.MuiMenuItem-root:hover {
+    background: rgb(var(--jfd-surface-2)) !important;
+}
+
+.formDialogHeader,
+.formDialogFooter {
+    background: transparent !important;
+    border-color: rgb(255 255 255 / 0.06) !important;
+}
+
+.toast {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+    border-radius: 999px !important;
+    font-weight: 600;
+}
+
+/* Búsqueda */
+.searchFields .inputContainer {
+    max-width: 720px;
+    margin: 0 auto;
+}
+
+.searchfields-txtSearch {
+    border-radius: 999px !important;
+    padding-left: 1.2em !important;
+    font-size: 1.05rem !important;
+}
+
+/* Alfabeto lateral */
+.alphaPickerButton {
+    border-radius: 999px !important;
+    color: rgb(var(--jfd-text-2)) !important;
+}
+
+.alphaPickerButton-selected {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+}
+
+/* Reproductor: barra de progreso y botones */
+.osdControls .sliderContainer .mdl-slider-background-lower,
+.mdl-slider-background-lower {
+    background: rgb(var(--jfd-accent)) !important;
+}
+
+.mdl-slider::-webkit-slider-thumb {
+    background: rgb(var(--jfd-accent)) !important;
+}
+
+.videoOsdBottom {
+    background: linear-gradient(to top, rgb(0 0 0 / 0.8), transparent) !important;
+}
+
+/* ---------- Móvil ---------- */
+
+@media (max-width: 600px) {
+    .sectionTitle,
+    .sectionTitle-cards {
+        font-size: 1.15rem !important;
+    }
+
+    .mainDetailButtons .detailButton:not(.btnPlay):not(.btnResume) {
+        width: 44px;
+        height: 44px;
+    }
+}
