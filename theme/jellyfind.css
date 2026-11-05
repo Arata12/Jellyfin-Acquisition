@@ -350,11 +350,25 @@ body {
     background: rgb(var(--jfd-surface)) !important;
     box-shadow: 0 0 0 1px rgb(255 255 255 / 0.05);
     overflow: hidden;
-    transition: transform 0.45s var(--jfd-ease), box-shadow 0.45s var(--jfd-ease) !important;
 }
 
-.cardScalable .cardImageContainer {
-    transition: filter 0.45s var(--jfd-ease);
+/* Imagen que se acerca un poco al pasar el ratón (dentro de la tarjeta, sin salirse de la fila) */
+.cardScalable .cardImageContainer.coveredImage,
+.cardScalable .cardContent .cardImageContainer {
+    transition: transform 0.6s var(--jfd-ease);
+}
+
+/* Aro del hover: por dentro de la tarjeta, así ninguna fila lo recorta */
+.cardScalable::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 2px rgb(var(--jfd-accent) / 0.85);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s var(--jfd-ease);
+    z-index: 2;
 }
 
 .cardContent-shadow,
@@ -363,22 +377,21 @@ body {
     box-shadow: none !important;
 }
 
-/* Hover: la tarjeta sube un poco, con un borde fino de cristal y sombra (sin aro blanco grueso) */
 @media (hover: hover) {
-    .card-hoverable:hover .cardScalable {
-        transform: translateY(-4px);
-        box-shadow: 0 0 0 1px rgb(255 255 255 / 0.22), 0 18px 34px -10px rgb(0 0 0 / 0.75);
+    .card-hoverable:hover .cardScalable .cardImageContainer.coveredImage,
+    .card-hoverable:hover .cardScalable .cardContent .cardImageContainer {
+        transform: scale(1.05);
     }
 
-    .card-hoverable:hover .cardScalable .cardImageContainer {
-        filter: brightness(1.08);
+    .card-hoverable:hover .cardScalable::after {
+        opacity: 1;
     }
 }
 
-/* Teclado o mando: aro blanco solo con foco visible */
-.card:focus-visible .cardScalable,
-.layout-tv .card:focus .cardScalable {
-    box-shadow: 0 0 0 2px rgb(var(--jfd-accent)), 0 18px 34px -10px rgb(0 0 0 / 0.75);
+/* Teclado o mando: el mismo aro con foco visible */
+.card:focus-visible .cardScalable::after,
+.layout-tv .card:focus .cardScalable::after {
+    opacity: 1;
 }
 
 .cardBox,
@@ -387,8 +400,9 @@ body {
     border: 0 !important;
 }
 
+/* Sin velo sobre la imagen: solo un degradado abajo, detrás de los botones */
 .cardOverlayContainer {
-    background: linear-gradient(to top, rgb(0 0 0 / 0.7), rgb(0 0 0 / 0.15) 45%, transparent 70%) !important;
+    background: linear-gradient(to top, rgb(0 0 0 / 0.6), transparent 38%) !important;
     border: 0 !important;
     transition: opacity 0.3s var(--jfd-ease) !important;
 }
@@ -961,61 +975,70 @@ a,
 
 /* Cabecera del reproductor: sin barra opaca, solo un degradado sobre el vídeo */
 .skinHeader.osdHeader {
-    background: linear-gradient(to bottom, rgb(0 0 0 / 0.75), rgb(0 0 0 / 0.3) 60%, transparent) !important;
+    background: linear-gradient(to bottom, rgb(0 0 0 / 0.7), transparent) !important;
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
     border-bottom: 0 !important;
 }
 
 body:has(#videoOsdPage:not(.hide)) .skinHeader .MuiTypography-root {
-    font-weight: 700 !important;
-    font-size: 1.1rem !important;
-    letter-spacing: -0.01em;
-    text-shadow: 0 1px 10px rgb(0 0 0 / 0.6);
+    font-weight: 600 !important;
+    text-shadow: 0 1px 8px rgb(0 0 0 / 0.6);
 }
 
-/* Controles: panel de cristal flotante con esquinas redondeadas */
+/* Abajo, como en plezy: degradado profundo, título grande, barra fina a todo el ancho y
+   los controles de reproducción centrados */
 .videoOsdBottom {
-    background: linear-gradient(to top, rgb(0 0 0 / 0.7), transparent) !important;
-    padding: 0 2.2% 1.8% !important;
+    background: linear-gradient(to top, rgb(0 0 0 / 0.85) 0%, rgb(0 0 0 / 0.55) 45%, transparent 100%) !important;
+    padding: 6em 2.5% 1.2em !important;
 }
 
 .videoOsdBottom .osdControls {
-    background: rgb(var(--jfd-glass) / 0.6) !important;
-    -webkit-backdrop-filter: blur(var(--jfd-blur)) saturate(1.4);
-    backdrop-filter: blur(var(--jfd-blur)) saturate(1.4);
-    border: 1px solid rgb(255 255 255 / 0.08);
-    border-radius: 24px;
-    padding: 14px 18px 10px !important;
-    box-shadow: 0 20px 50px rgb(0 0 0 / 0.45);
+    background: transparent !important;
 }
 
 .videoOsdBottom .osdTitle {
     font-weight: 700 !important;
-    font-size: 1.05rem;
-    margin: 0 0 2px 4px !important;
+    font-size: 1.45rem;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.35em !important;
+    text-shadow: 0 2px 12px rgb(0 0 0 / 0.5);
+}
+
+.videoOsdBottom .osdMainTextContainer {
+    padding: 0 !important;
 }
 
 .videoOsdBottom .osdTextContainer,
 .videoOsdBottom .osdTimeText {
-    color: rgb(var(--jfd-text-2)) !important;
+    color: rgb(255 255 255 / 0.75) !important;
     font-variant-numeric: tabular-nums;
     font-size: 0.85rem;
 }
 
-.videoOsdBottom .osdPositionText {
-    color: rgb(var(--jfd-text)) !important;
+.videoOsdBottom .buttons {
+    position: relative;
+    align-items: center;
+    gap: 2px;
+    padding: 0.4em 0 0 !important;
 }
 
-.videoOsdBottom .buttons {
-    gap: 4px;
-    padding-top: 2px !important;
+/* Retroceder · reproducir/pausa · avanzar, en el centro */
+.layout-desktop .videoOsdBottom .buttons > div:first-child,
+.layout-tv .videoOsdBottom .buttons > div:first-child {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -40%);
+    display: flex;
+    align-items: center;
+    gap: 14px;
 }
 
 .videoOsdBottom .paper-icon-button-light {
     border-radius: 999px !important;
-    color: rgb(var(--jfd-text)) !important;
-    transition: background-color 0.25s var(--jfd-ease), transform 0.25s var(--jfd-ease);
+    color: #fff !important;
+    transition: background-color 0.2s var(--jfd-ease), transform 0.2s var(--jfd-ease);
 }
 
 .videoOsdBottom .paper-icon-button-light:hover {
@@ -1023,23 +1046,28 @@ body:has(#videoOsdPage:not(.hide)) .skinHeader .MuiTypography-root {
 }
 
 .videoOsdBottom .paper-icon-button-light:active {
-    transform: scale(0.94);
+    transform: scale(0.92);
 }
 
-/* Reproducir/pausa: el botón principal, círculo blanco como en plezy */
+/* Reproducir/pausa: círculo blanco */
 .videoOsdBottom .btnPause {
-    background: rgb(var(--jfd-accent)) !important;
-    color: rgb(var(--jfd-on-accent)) !important;
-    margin: 0 6px !important;
-    box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
+    background: #fff !important;
+    color: #000 !important;
+    width: 3.2em;
+    height: 3.2em;
+    padding: 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .videoOsdBottom .btnPause:hover {
-    background: rgb(var(--jfd-accent) / 0.88) !important;
+    background: rgb(255 255 255 / 0.88) !important;
 }
 
 .videoOsdBottom .btnPause .material-icons {
     color: inherit !important;
+    font-size: 2em !important;
 }
 
 /* Barra de "reproduciendo ahora" (al salir del reproductor) */
@@ -1164,11 +1192,10 @@ body:has(#videoOsdPage:not(.hide)) .skinHeader .MuiTypography-root {
     }
 
     .videoOsdBottom {
-        padding: 0 8px 8px !important;
+        padding: 4em 12px 10px !important;
     }
 
-    .videoOsdBottom .osdControls {
-        border-radius: 18px;
-        padding: 10px 10px 6px !important;
+    .videoOsdBottom .osdTitle {
+        font-size: 1.15rem;
     }
 }
