@@ -11,6 +11,19 @@
  */
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
 
+/* Iconos redondeados (como Abyss) */
+@font-face {
+    font-family: "Material Icons Round";
+    font-style: normal;
+    font-weight: 400;
+    font-display: block;
+    src: url("https://cdn.jsdelivr.net/npm/material-icons@1.13.12/iconfont/material-icons-round.woff2") format("woff2");
+}
+
+.material-icons {
+    font-family: "Material Icons Round", "Material Icons" !important;
+}
+
 :root {
     --jfd-bg: 13 13 15;              /* fondo de la página */
     --jfd-surface: 24 24 27;         /* paneles, menús y diálogos */
@@ -23,7 +36,10 @@
     --jfd-radius: 10px;              /* pósters y tarjetas */
     --jfd-radius-lg: 18px;           /* diálogos y paneles */
     --jfd-font: "Inter", "Segoe UI", Roboto, system-ui, sans-serif;
-    --jfd-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --jfd-ease: cubic-bezier(0.16, 1, 0.3, 1);
+    --jfd-glass: 30 30 34;           /* tinte del cristal: menús, diálogos y reproductor */
+    --jfd-glass-alpha: 0.7;
+    --jfd-blur: 22px;
 
 
     /* Estilo del plugin Jellyfind (buscador y solicitudes) */
@@ -332,18 +348,37 @@ body {
 
 .cardScalable {
     background: rgb(var(--jfd-surface)) !important;
-    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.04);
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.05);
     overflow: hidden;
+    transition: transform 0.45s var(--jfd-ease), box-shadow 0.45s var(--jfd-ease) !important;
+}
+
+.cardScalable .cardImageContainer {
+    transition: filter 0.45s var(--jfd-ease);
 }
 
 .cardContent-shadow,
-.cardBox-focustransform {
+.cardBox-focustransform,
+.cardPadder {
     box-shadow: none !important;
 }
 
-.card-hoverable:hover .cardScalable,
-.card:focus .cardScalable {
-    box-shadow: 0 0 0 2px rgb(var(--jfd-accent) / 0.9);
+/* Hover: la tarjeta sube un poco, con un borde fino de cristal y sombra (sin aro blanco grueso) */
+@media (hover: hover) {
+    .card-hoverable:hover .cardScalable {
+        transform: translateY(-4px);
+        box-shadow: 0 0 0 1px rgb(255 255 255 / 0.22), 0 18px 34px -10px rgb(0 0 0 / 0.75);
+    }
+
+    .card-hoverable:hover .cardScalable .cardImageContainer {
+        filter: brightness(1.08);
+    }
+}
+
+/* Teclado o mando: aro blanco solo con foco visible */
+.card:focus-visible .cardScalable,
+.layout-tv .card:focus .cardScalable {
+    box-shadow: 0 0 0 2px rgb(var(--jfd-accent)), 0 18px 34px -10px rgb(0 0 0 / 0.75);
 }
 
 .cardBox,
@@ -352,12 +387,10 @@ body {
     border: 0 !important;
 }
 
-.card:focus .cardBox:not(.visualCardBox) .cardScalable {
-    border: 0 !important;
-}
-
 .cardOverlayContainer {
-    background: linear-gradient(to top, rgb(0 0 0 / 0.65), rgb(0 0 0 / 0.1) 60%) !important;
+    background: linear-gradient(to top, rgb(0 0 0 / 0.7), rgb(0 0 0 / 0.15) 45%, transparent 70%) !important;
+    border: 0 !important;
+    transition: opacity 0.3s var(--jfd-ease) !important;
 }
 
 .cardOverlayButton,
@@ -365,8 +398,40 @@ body {
     border-radius: 999px !important;
 }
 
+.cardOverlayButton:not(.cardOverlayFab-primary):hover {
+    background: rgb(255 255 255 / 0.16) !important;
+}
+
+/* Botón de reproducir del hover: círculo blanco discreto, no un disco enorme */
 .cardOverlayFab-primary {
+    background: rgb(var(--jfd-accent) / 0.94) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.45) !important;
+    transition: transform 0.3s var(--jfd-ease), background-color 0.3s var(--jfd-ease) !important;
+}
+
+.cardOverlayFab-primary:not(.MuiIconButton-root) {
+    font-size: 100% !important;
+}
+
+.cardOverlayFab-primary.MuiIconButton-root {
+    transform: scale(1.1) !important;
+}
+
+.cardOverlayFab-primary:hover {
     background: rgb(var(--jfd-accent)) !important;
+}
+
+.cardOverlayFab-primary:not(.MuiIconButton-root):hover {
+    transform: scale(1.08);
+}
+
+.cardOverlayFab-primary.MuiIconButton-root:hover {
+    transform: scale(1.2) !important;
+}
+
+.cardOverlayFab-primary .material-icons,
+.cardOverlayFab-primary .MuiSvgIcon-root {
     color: rgb(var(--jfd-on-accent)) !important;
 }
 
@@ -383,8 +448,10 @@ body {
 }
 
 .cardFooter,
-.cardFooter .cardText {
+.cardFooter .cardText,
+.card .cardText.cardTextCentered {
     text-align: left !important;
+    justify-content: flex-start !important;
     padding-left: 2px;
 }
 
@@ -845,18 +912,242 @@ a,
     color: rgb(var(--jfd-on-accent)) !important;
 }
 
-/* Reproductor: barra de progreso y botones */
-.osdControls .sliderContainer .mdl-slider-background-lower,
+/* ---------- Deslizadores (reproductor, volumen, ajustes) ---------- */
+
+.mdl-slider-background-flex,
+.mdl-slider-background-flex-inner,
+.mdl-slider-background-upper,
+.mdl-slider-background-lower {
+    border-radius: 99px !important;
+}
+
+.mdl-slider-background-upper {
+    background: rgb(255 255 255 / 0.22) !important;
+}
+
 .mdl-slider-background-lower {
     background: rgb(var(--jfd-accent)) !important;
 }
 
 .mdl-slider::-webkit-slider-thumb {
     background: rgb(var(--jfd-accent)) !important;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.5);
 }
 
+.mdl-slider::-moz-range-thumb {
+    background: rgb(var(--jfd-accent)) !important;
+    border: 0 !important;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.5);
+}
+
+.sliderMarker {
+    background: rgb(255 255 255 / 0.6) !important;
+}
+
+.sliderBubble {
+    background: rgb(var(--jfd-glass) / 0.85) !important;
+    border: 1px solid rgb(255 255 255 / 0.1);
+    border-radius: 12px !important;
+    overflow: hidden;
+}
+
+.chapterThumbContainer,
+.chapterThumb {
+    border-radius: 12px !important;
+    overflow: hidden;
+}
+
+/* ---------- Reproductor de vídeo ---------- */
+
+/* Cabecera del reproductor: sin barra opaca, solo un degradado sobre el vídeo */
+.skinHeader.osdHeader {
+    background: linear-gradient(to bottom, rgb(0 0 0 / 0.75), rgb(0 0 0 / 0.3) 60%, transparent) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    border-bottom: 0 !important;
+}
+
+body:has(#videoOsdPage:not(.hide)) .skinHeader .MuiTypography-root {
+    font-weight: 700 !important;
+    font-size: 1.1rem !important;
+    letter-spacing: -0.01em;
+    text-shadow: 0 1px 10px rgb(0 0 0 / 0.6);
+}
+
+/* Controles: panel de cristal flotante con esquinas redondeadas */
 .videoOsdBottom {
-    background: linear-gradient(to top, rgb(0 0 0 / 0.8), transparent) !important;
+    background: linear-gradient(to top, rgb(0 0 0 / 0.7), transparent) !important;
+    padding: 0 2.2% 1.8% !important;
+}
+
+.videoOsdBottom .osdControls {
+    background: rgb(var(--jfd-glass) / 0.6) !important;
+    -webkit-backdrop-filter: blur(var(--jfd-blur)) saturate(1.4);
+    backdrop-filter: blur(var(--jfd-blur)) saturate(1.4);
+    border: 1px solid rgb(255 255 255 / 0.08);
+    border-radius: 24px;
+    padding: 14px 18px 10px !important;
+    box-shadow: 0 20px 50px rgb(0 0 0 / 0.45);
+}
+
+.videoOsdBottom .osdTitle {
+    font-weight: 700 !important;
+    font-size: 1.05rem;
+    margin: 0 0 2px 4px !important;
+}
+
+.videoOsdBottom .osdTextContainer,
+.videoOsdBottom .osdTimeText {
+    color: rgb(var(--jfd-text-2)) !important;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+}
+
+.videoOsdBottom .osdPositionText {
+    color: rgb(var(--jfd-text)) !important;
+}
+
+.videoOsdBottom .buttons {
+    gap: 4px;
+    padding-top: 2px !important;
+}
+
+.videoOsdBottom .paper-icon-button-light {
+    border-radius: 999px !important;
+    color: rgb(var(--jfd-text)) !important;
+    transition: background-color 0.25s var(--jfd-ease), transform 0.25s var(--jfd-ease);
+}
+
+.videoOsdBottom .paper-icon-button-light:hover {
+    background: rgb(255 255 255 / 0.12) !important;
+}
+
+.videoOsdBottom .paper-icon-button-light:active {
+    transform: scale(0.94);
+}
+
+/* Reproducir/pausa: el botón principal, círculo blanco como en plezy */
+.videoOsdBottom .btnPause {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+    margin: 0 6px !important;
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
+}
+
+.videoOsdBottom .btnPause:hover {
+    background: rgb(var(--jfd-accent) / 0.88) !important;
+}
+
+.videoOsdBottom .btnPause .material-icons {
+    color: inherit !important;
+}
+
+/* Barra de "reproduciendo ahora" (al salir del reproductor) */
+.nowPlayingBar {
+    background: rgb(var(--jfd-glass) / var(--jfd-glass-alpha)) !important;
+    -webkit-backdrop-filter: blur(var(--jfd-blur)) saturate(1.4);
+    backdrop-filter: blur(var(--jfd-blur)) saturate(1.4);
+    border-top: 1px solid rgb(255 255 255 / 0.08);
+    box-shadow: 0 -10px 30px rgb(0 0 0 / 0.35) !important;
+}
+
+.nowPlayingBar .nowPlayingImage {
+    border-radius: 8px;
+}
+
+.nowPlayingBar .playPauseButton {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+    border-radius: 999px !important;
+}
+
+.upNextContainer {
+    border-radius: var(--jfd-radius-lg) !important;
+    border: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.upNextDialog-countdownText {
+    color: rgb(var(--jfd-accent)) !important;
+}
+
+/* ---------- Cristal (como Abyss) ---------- */
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .mainDrawer,
+    .MuiDrawer-paper,
+    .dialog:not(.dialog-fullscreen),
+    .actionSheet,
+    .MuiPaper-root.MuiDialog-paper,
+    .MuiPaper-root.MuiMenu-paper,
+    .MuiPopover-paper,
+    .upNextContainer,
+    .iconOsd,
+    .playerStats-stats,
+    .selectionCommandsPanel {
+        background-color: rgb(var(--jfd-glass) / var(--jfd-glass-alpha)) !important;
+        -webkit-backdrop-filter: blur(var(--jfd-blur)) saturate(1.4);
+        backdrop-filter: blur(var(--jfd-blur)) saturate(1.4);
+    }
+
+    .cardOverlayButton:not(.cardOverlayFab-primary),
+    .indicator {
+        -webkit-backdrop-filter: blur(4px);
+        backdrop-filter: blur(4px);
+    }
+}
+
+/* ---------- Animaciones ---------- */
+
+/* Las secciones entran deslizándose hacia arriba */
+@keyframes jfd-fade-up {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.verticalSection {
+    animation: jfd-fade-up 0.6s var(--jfd-ease) both;
+}
+
+.verticalSection:nth-child(2) { animation-delay: 0.05s; }
+.verticalSection:nth-child(3) { animation-delay: 0.1s; }
+.verticalSection:nth-child(4) { animation-delay: 0.15s; }
+.verticalSection:nth-child(n+5) { animation-delay: 0.2s; }
+
+/* El corazón de favorito late al marcarlo */
+@keyframes jfd-pop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.3); }
+    70% { transform: scale(0.95); }
+    100% { transform: scale(1); }
+}
+
+.ratingbutton-withrating .material-icons.favorite,
+.btnUserRating .ratingbutton-icon-withrating {
+    animation: jfd-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.emby-tab-button,
+.navMenuOption,
+.listItem,
+.actionSheetMenuItem,
+.cardOverlayButton {
+    transition: background-color 0.35s var(--jfd-ease), color 0.35s var(--jfd-ease), transform 0.35s var(--jfd-ease) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
 }
 
 /* ---------- Móvil ---------- */
@@ -870,5 +1161,14 @@ a,
     .mainDetailButtons .detailButton:not(.btnPlay):not(.btnResume) {
         width: 44px;
         height: 44px;
+    }
+
+    .videoOsdBottom {
+        padding: 0 8px 8px !important;
+    }
+
+    .videoOsdBottom .osdControls {
+        border-radius: 18px;
+        padding: 10px 10px 6px !important;
     }
 }
