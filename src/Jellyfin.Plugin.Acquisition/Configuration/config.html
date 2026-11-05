@@ -101,35 +101,18 @@
                     <div class="fieldDescription checkboxFieldDescription">El plugin marca cada torrent con una etiqueta «acq-…» para seguirlo. Con esta opción se borran las de descargas ya importadas o canceladas (el torrent se conserva). Las demás etiquetas no se tocan.</div>
                 </div>
 
-                <h2>Preferencias y Límites de Releases</h2>
+                <h2>Preferencias de Releases</h2>
                 <div class="selectContainer">
                     <label class="selectLabel" for="ReleaseSelectionMode">Selección de release</label>
                     <select is="emby-select" id="ReleaseSelectionMode" name="ReleaseSelectionMode" class="emby-select-withcolor">
-                        <option value="auto">Automática: se descarga la release elegible con más semillas</option>
+                        <option value="auto">Automática: se descarga la release con más puntos de calidad</option>
                         <option value="manual">Manual: el plugin busca y espera a que elijas la release</option>
                     </select>
                     <div class="fieldDescription">En modo manual no se envía nada a qBittorrent hasta que eliges una release en «Seleccionar release». En una serie se pide una elección por cada descarga, de una en una.</div>
                 </div>
-                <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="PreferredResolution">Resolución Preferida</label>
-                    <input is="emby-input" type="text" id="PreferredResolution" name="PreferredResolution" value="1080p" />
-                </div>
-                <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="PreferredSource">Fuente Preferida</label>
-                    <input is="emby-input" type="text" id="PreferredSource" name="PreferredSource" value="WEB-DL" />
-                </div>
-                <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="PreferredCodec">Códec Preferido</label>
-                    <input is="emby-input" type="text" id="PreferredCodec" name="PreferredCodec" value="H.264" />
-                </div>
-                <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="MaxMovieSizeBytes">Límite tamaño película (bytes)</label>
-                    <input is="emby-input" type="number" id="MaxMovieSizeBytes" name="MaxMovieSizeBytes" value="15000000000" />
-                </div>
-                <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="MaxEpisodeSizeBytes">Límite tamaño episodio (bytes)</label>
-                    <input is="emby-input" type="number" id="MaxEpisodeSizeBytes" name="MaxEpisodeSizeBytes" value="4000000000" />
-                </div>
+                <h3>Puntos de calidad</h3>
+                <div class="fieldDescription" style="margin-bottom: 1em;">Cada release suma los puntos de su resolución, su fuente y su códec, y se elige la que más sume (a igualdad, la de más semillas). Ninguna se descarta por su calidad: con puntos negativos una opción queda por detrás de las demás. Ejemplo con los valores por defecto: 1080p + WEB-DL + H.265 = 230 puntos; 2160p + Bluray + H.265 = 160.</div>
+                <div id="qualityPoints" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(14em, 1fr)); gap: 0 2em;"></div>
 
                 <h2>Apariencia del buscador</h2>
                 <div class="selectContainer">
@@ -199,6 +182,23 @@
             }
 
             // The server may serialize enums as numbers or as names
+            // [propiedad de la configuración, etiqueta, valor por defecto]
+            var QUALITY_POINTS = [
+                { title: 'Resolución', items: [['Points2160p', '2160p (4K)', 40], ['Points1080p', '1080p', 100], ['Points720p', '720p', 60], ['Points480p', '480p / SD', 10], ['PointsResolutionUnknown', 'Sin indicar', 20]] },
+                { title: 'Fuente', items: [['PointsWebDl', 'WEB-DL', 100], ['PointsBluray', 'Bluray', 90], ['PointsWebRip', 'WEBRip', 70], ['PointsHdtv', 'HDTV', 30], ['PointsSourceUnknown', 'Sin indicar', 20]] },
+                { title: 'Códec', items: [['PointsH264', 'H.264 (x264, AVC)', 30], ['PointsH265', 'H.265 (x265, HEVC)', 30], ['PointsAv1', 'AV1', 20], ['PointsCodecUnknown', 'Sin indicar', 10]] }
+            ];
+
+            function renderQualityPoints(config) {
+                document.querySelector('#qualityPoints').innerHTML = QUALITY_POINTS.map(function (group) {
+                    return '<div><h4 style="margin: 0.6em 0;">' + group.title + '</h4>' + group.items.map(function (item) {
+                        var value = typeof config[item[0]] === 'number' ? config[item[0]] : item[2];
+                        return '<div class="inputContainer" style="margin-bottom: 1em;"><label class="inputLabel" for="' + item[0] + '">' + escapeHtml(item[1]) + '</label>' +
+                            '<input is="emby-input" type="number" step="1" id="' + item[0] + '" value="' + value + '" /></div>';
+                    }).join('') + '</div>';
+                }).join('');
+            }
+
             function isMovieKind(kind) {
                 return kind === 0 || kind === 'Movie';
             }
@@ -244,11 +244,7 @@
                     document.querySelector('#QBittorrentUsername').value = config.QBittorrentUsername || 'admin';
                     document.querySelector('#QBittorrentPassword').value = config.QBittorrentPassword || '';
 
-                    document.querySelector('#PreferredResolution').value = config.PreferredResolution || '1080p';
-                    document.querySelector('#PreferredSource').value = config.PreferredSource || 'WEB-DL';
-                    document.querySelector('#PreferredCodec').value = config.PreferredCodec || 'H.264';
-                    document.querySelector('#MaxMovieSizeBytes').value = config.MaxMovieSizeBytes || 15000000000;
-                    document.querySelector('#MaxEpisodeSizeBytes').value = config.MaxEpisodeSizeBytes || 4000000000;
+                    renderQualityPoints(config);
 
                     document.querySelector('#ReleaseSelectionMode').value = config.ReleaseSelectionMode === 'manual' ? 'manual' : 'auto';
                     document.querySelector('#SearchStyle').value = ['auto', 'jellyfin', 'abyss'].indexOf(config.SearchStyle) >= 0 ? config.SearchStyle : 'auto';
@@ -423,11 +419,12 @@
                         config.QBittorrentUsername = document.querySelector('#QBittorrentUsername').value;
                         config.QBittorrentPassword = document.querySelector('#QBittorrentPassword').value;
 
-                        config.PreferredResolution = document.querySelector('#PreferredResolution').value;
-                        config.PreferredSource = document.querySelector('#PreferredSource').value;
-                        config.PreferredCodec = document.querySelector('#PreferredCodec').value;
-                        config.MaxMovieSizeBytes = parseInt(document.querySelector('#MaxMovieSizeBytes').value, 10) || 15000000000;
-                        config.MaxEpisodeSizeBytes = parseInt(document.querySelector('#MaxEpisodeSizeBytes').value, 10) || 4000000000;
+                        QUALITY_POINTS.forEach(function (group) {
+                            group.items.forEach(function (item) {
+                                var value = parseInt(document.querySelector('#' + item[0]).value, 10);
+                                config[item[0]] = isNaN(value) ? item[2] : value;
+                            });
+                        });
 
                         config.ReleaseSelectionMode = document.querySelector('#ReleaseSelectionMode').value;
                         config.SearchStyle = document.querySelector('#SearchStyle').value;

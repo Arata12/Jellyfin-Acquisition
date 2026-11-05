@@ -299,15 +299,23 @@
         });
         observer.observe(document.body, { childList: true, subtree: true });
 
+        document.addEventListener('viewshow', () => setTimeout(ensureHeaderButton, 100));
+
         checkPageContext();
     }
+
+    let headerButtonTimer = null;
 
     function checkPageContext() {
         keepSectionInPlace();
         maintainRequestsSection();
         ensureHeaderButton();
         // The count only exists for a logged-in user
-        if (hasSession()) startAttentionPolling();
+        if (hasSession()) {
+            startAttentionPolling();
+            // The header can be shown or swapped by a class change alone, which the DOM observer doesn't see
+            if (!headerButtonTimer) headerButtonTimer = setInterval(ensureHeaderButton, 2000);
+        }
         checkSeriesDetailsPage();
     }
 
@@ -544,7 +552,7 @@
         const existing = document.getElementById('acquisition-requests-button');
         if (existing) {
             // Left in a header that is now hidden (e.g. the legacy one): move it next to the visible search button
-            if (isShown(existing) || !searchButton) return;
+            if (!searchButton || (isShown(existing) && existing.parentElement === searchButton.parentElement)) return;
             existing.remove();
         }
 
@@ -1717,6 +1725,7 @@
                     codec: rel.codec ?? rel.Codec,
                     seeders: rel.seeders ?? rel.Seeders ?? 0,
                     size: rel.size ?? rel.Size ?? 0,
+                    score: rel.score ?? rel.Score ?? 0,
                     isEligible: Boolean(rel.isEligible ?? rel.IsEligible),
                     rejectionReasons: rel.rejectionReasons || rel.RejectionReasons || []
                 }));
@@ -1734,7 +1743,8 @@
                                     <span>${escapeHtml(rel.source || 'Src: ?')}</span> •
                                     <span>${escapeHtml(rel.codec || 'Codec: ?')}</span> •
                                     <span>Seeders: ${Number(rel.seeders) || 0}</span> •
-                                    <span>${((Number(rel.size) || 0) / 1073741824).toFixed(2)} GB</span>
+                                    <span>${((Number(rel.size) || 0) / 1073741824).toFixed(2)} GB</span> •
+                                    <span title="Puntos de calidad (resolución + fuente + códec)">${Number(rel.score) || 0} pts</span>
                                 </div>
                                 ${rel.rejectionReasons?.length ? `<div class="rejection-reasons">${rel.rejectionReasons.map(r => `<span>${escapeHtml(r)}</span>`).join('')}</div>` : ''}
                             </div>

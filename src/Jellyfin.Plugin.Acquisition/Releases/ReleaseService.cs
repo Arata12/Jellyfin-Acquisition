@@ -131,12 +131,16 @@ public class ReleaseService : IReleaseService
             }
         }
 
-        // Deterministic ordering (user decision): eligible first, then the release that best matches the quality
-        // preferences (resolution > source > codec, in the score), then most seeders among equal quality, then title.
-        // A release of another title never sits above one of the requested title, whatever its seeders.
+        // Deterministic ordering (user decision): eligible first; a whole-season pack when a whole season was asked for;
+        // a torrent with seeders before one without (it would never download); then the most quality points, then the
+        // most seeders among equal points, then title. A release of another title never sits above one of the requested
+        // title, whatever its seeders.
+        var wantsWholeSeason = request.Kind == MediaKind.Series && request.Scope.SeasonNumbers.Count > 0 && request.Scope.EpisodeNumbers.Count == 0;
         return candidates
             .OrderByDescending(c => c.IsEligible)
             .ThenByDescending(c => c.IdentityVerified && !c.IdentityRejected)
+            .ThenByDescending(c => wantsWholeSeason && c.IsSeasonPack)
+            .ThenByDescending(c => c.Seeders > 0)
             .ThenByDescending(c => c.Score)
             .ThenByDescending(c => c.Seeders)
             .ThenBy(c => c.Title, StringComparer.Ordinal)
@@ -461,9 +465,6 @@ public class ReleaseService : IReleaseService
 
     private const string NotTorrentReason = "No es un torrent.";
 
-    private static string FormatSize(long bytes) =>
-        (bytes / 1073741824.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " GB";
-
     private static void EvaluateCandidate(ReleaseCandidate candidate, AcquisitionRequest request, DownloadUnit? unit, IReadOnlyList<string> aliases, Configuration.PluginConfiguration? config)
     {
         var reasons = new List<string>(candidate.RejectionReasons);
@@ -684,71 +685,41 @@ public class ReleaseService : IReleaseService
         // Everything but the protocol is an identity or scope problem a manual choice must not override
         candidate.IdentityOrScopeMismatch = reasons.Any(r => r != NotTorrentReason);
 
-        // 5. Mandatory: Size limits
-        if (config != null)
-        {
-            if (request.Kind == MediaKind.Movie && config.MaxMovieSizeBytes > 0 && candidate.Size > config.MaxMovieSizeBytes)
-            {
-                reasons.Add($"Pesa más del límite para películas ({FormatSize(candidate.Size)}; el máximo es {FormatSize(config.MaxMovieSizeBytes)}).");
-            }
-            else if (request.Kind == MediaKind.Series)
-            {
-                if (candidate.IsSeasonPack && config.MaxSeasonSizeBytes > 0 && candidate.Size > config.MaxSeasonSizeBytes)
-                {
-                    reasons.Add($"Pesa más del límite para temporadas ({FormatSize(candidate.Size)}; el máximo es {FormatSize(config.MaxSeasonSizeBytes)}).");
-                }
-                else if (!candidate.IsSeasonPack && config.MaxEpisodeSizeBytes > 0 && candidate.Size > config.MaxEpisodeSizeBytes)
-                {
-                    reasons.Add($"Pesa más del límite para episodios ({FormatSize(candidate.Size)}; el máximo es {FormatSize(config.MaxEpisodeSizeBytes)}).");
-                }
-            }
-        }
-
         candidate.IsEligible = reasons.Count == 0;
         candidate.RejectionReasons = reasons.Distinct().ToList();
 
-        // 6. Strict lexicographical tuple scoring (R13)
-        var prefRes = config?.PreferredResolution ?? "1080p";
-        var prefSource = config?.PreferredSource ?? "WEB-DL";
-        var prefCodec = config?.PreferredCodec ?? "H.264";
+        // 5. Quality points (user decision): each resolution, source and codec is worth the points set in the
+        // configuration and the release with the highest total wins. Nothing is rejected for its quality.
+        candidate.Score = QualityPoints(candidate, config ?? new Configuration.PluginConfiguration());
+    }
 
-        var resTier = candidate.Resolution switch
+    /// <summary>Points of a release: those of its resolution, plus its source, plus its codec.</summary>
+    public static int QualityPoints(ReleaseCandidate candidate, Configuration.PluginConfiguration config)
+    {
+        var resolution = candidate.Resolution switch
         {
-            var r when string.Equals(r, prefRes, StringComparison.OrdinalIgnoreCase) => 4,
-            "1080p" => 3,
-            "720p" => 2,
-            "2160p" => 1,
-            _ => 0
+            "2160p" => config.Points2160p,
+            "1080p" => config.Points1080p,
+            "720p" => config.Points720p,
+            "480p" => config.Points480p,
+            _ => config.PointsResolutionUnknown
         };
-
-        var sourceTier = candidate.Source switch
+        var source = candidate.Source switch
         {
-            var s when string.Equals(s, prefSource, StringComparison.OrdinalIgnoreCase) => 4,
-            "WEB-DL" => 3,
-            "Bluray" => 2,
-            "WEBRip" => 1,
-            "HDTV" => 1,
-            _ => 0
+            "WEB-DL" => config.PointsWebDl,
+            "Bluray" => config.PointsBluray,
+            "WEBRip" => config.PointsWebRip,
+            "HDTV" => config.PointsHdtv,
+            _ => config.PointsSourceUnknown
         };
-
-        var codecTier = candidate.Codec switch
+        var codec = candidate.Codec switch
         {
-            var c when string.Equals(c, prefCodec, StringComparison.OrdinalIgnoreCase) => 3,
-            "H.264" => 2,
-            "H.265" => 1,
-            _ => 0
+            "H.264" => config.PointsH264,
+            "H.265" => config.PointsH265,
+            "AV1" => config.PointsAv1,
+            _ => config.PointsCodecUnknown
         };
-
-        // Resolution (1,000,000) -> Source (100,000) -> Codec (10,000) -> Seeders (max 9,999)
-        var score = (resTier * 1_000_000) + (sourceTier * 100_000) + (codecTier * 10_000) + Math.Min(candidate.Seeders, 9999);
-
-        // Bonus for season pack when requesting full season
-        if (request.Kind == MediaKind.Series && request.Scope.SeasonNumbers.Count > 0 && request.Scope.EpisodeNumbers.Count == 0 && candidate.IsSeasonPack)
-        {
-            score += 5_000_000;
-        }
-
-        candidate.Score = score;
+        return resolution + source + codec;
     }
 
     private static string ExtractTitlePrefix(string candidateTitle)

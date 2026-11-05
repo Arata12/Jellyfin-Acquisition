@@ -111,13 +111,22 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool RemoveTagsAfterImport { get; set; } = true;
 
-    // Release Preferences
-    public string PreferredResolution { get; set; } = "1080p";
-    public string PreferredSource { get; set; } = "WEB-DL";
-    public string PreferredCodec { get; set; } = "H.264";
-    public long MaxMovieSizeBytes { get; set; } = 15_000_000_000L;
-    public long MaxEpisodeSizeBytes { get; set; } = 4_000_000_000L;
-    public long MaxSeasonSizeBytes { get; set; } = 40_000_000_000L;
+    // Quality points (user decision): a release scores the points of its resolution + its source + its codec and the
+    // highest total wins (ties: most seeders). Negative points push a quality down; nothing is ever rejected for it.
+    public int Points2160p { get; set; } = 40;
+    public int Points1080p { get; set; } = 100;
+    public int Points720p { get; set; } = 60;
+    public int Points480p { get; set; } = 10;
+    public int PointsResolutionUnknown { get; set; } = 20;
+    public int PointsWebDl { get; set; } = 100;
+    public int PointsBluray { get; set; } = 90;
+    public int PointsWebRip { get; set; } = 70;
+    public int PointsHdtv { get; set; } = 30;
+    public int PointsSourceUnknown { get; set; } = 20;
+    public int PointsH264 { get; set; } = 30;
+    public int PointsH265 { get; set; } = 30;
+    public int PointsAv1 { get; set; } = 20;
+    public int PointsCodecUnknown { get; set; } = 10;
 
     /// <summary>
     /// Look of the external search block: "auto" (Abyss when that theme is installed, otherwise classic Jellyfin),

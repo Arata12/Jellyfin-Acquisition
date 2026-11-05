@@ -115,4 +115,54 @@ public class ReleaseSelectionTests
         Assert.False(s2.IsEligible);
         Assert.Contains(s2.RejectionReasons, r => r.Contains("Es otra temporada"));
     }
+
+    private static ReleaseCandidate Parsed(string title) => new()
+    {
+        Title = title,
+        Resolution = ReleaseParser.NormalizeResolution(title),
+        Source = ReleaseParser.NormalizeSource(title),
+        Codec = ReleaseParser.NormalizeCodec(title)
+    };
+
+    [Fact]
+    public void QualityPoints_AddResolutionSourceAndCodec()
+    {
+        var config = new Configuration.PluginConfiguration();
+
+        Assert.Equal(230, ReleaseService.QualityPoints(Parsed("Show.S01E01.1080p.WEB-DL.x265"), config));
+        Assert.Equal(230, ReleaseService.QualityPoints(Parsed("Show.S01E01.1080p.WEB-DL.x264"), config));
+        Assert.Equal(160, ReleaseService.QualityPoints(Parsed("Show.S01E01.2160p.BluRay.x265"), config));
+        Assert.Equal(50, ReleaseService.QualityPoints(Parsed("Show.S01E01"), config));
+
+        // The user's weights decide: H.265 worth more than H.264, and 4K pushed down with negative points
+        config.PointsH265 = 50;
+        config.Points2160p = -100;
+        Assert.True(ReleaseService.QualityPoints(Parsed("Show.S01E01.1080p.WEB-DL.x265"), config) > ReleaseService.QualityPoints(Parsed("Show.S01E01.1080p.WEB-DL.x264"), config));
+        Assert.True(ReleaseService.QualityPoints(Parsed("Show.S01E01.2160p.WEB-DL.x265"), config) < ReleaseService.QualityPoints(Parsed("Show.S01E01.480p.HDTV.x264"), config));
+    }
+
+    [Fact]
+    public async Task SearchAndEvaluateReleases_PicksMostPointsAndNeverRejectsForSizeOrCodec()
+    {
+        var mockProwlarr = new Mock<IProwlarrClient>();
+        var releases = new List<ProwlarrRelease>
+        {
+            new() { Title = "Show.S01E01.720p.WEB-DL.x264", Protocol = "torrent", Seeders = 500, Size = 900_000_000L },
+            new() { Title = "Show.S01E01.1080p.WEB-DL.x265", Protocol = "torrent", Seeders = 12, Size = 9_000_000_000L },  // big: no limit
+            new() { Title = "Show.S01E01.1080p.WEB-DL.H264.DEAD", Protocol = "torrent", Seeders = 0, Size = 2_000_000_000L } // no seeders
+        };
+        mockProwlarr.Setup(p => p.SearchAsync(It.IsAny<ProwlarrSearchQuery>(), It.IsAny<CancellationToken>())).ReturnsAsync(releases);
+        var service = new ReleaseService(mockProwlarr.Object, new Mock<ISonarrClient>().Object, new Mock<IRadarrClient>().Object, new Mock<ILogger<ReleaseService>>().Object);
+
+        var evaluated = await service.SearchAndEvaluateReleasesAsync(new AcquisitionRequest
+        {
+            Title = "Show",
+            Kind = MediaKind.Series,
+            Scope = new RequestScope { All = false, SeasonNumbers = [1], EpisodeNumbers = [1] }
+        });
+
+        Assert.All(evaluated, c => Assert.True(c.IsEligible, string.Join(" ", c.RejectionReasons)));
+        Assert.Equal("Show.S01E01.1080p.WEB-DL.x265", evaluated[0].Title);
+        Assert.Equal("Show.S01E01.1080p.WEB-DL.H264.DEAD", evaluated[^1].Title);
+    }
 }
