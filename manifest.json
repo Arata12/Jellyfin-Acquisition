@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "1.5.2.0",
+        "changelog": "El plugin pasa a llamarse Jellyfind.\nSin límites de tamaño: ninguna release se descarta por su peso.\nCalidad por puntos configurables (resolución + fuente + códec); gana la que más sume, a igualdad la de más semillas; los torrents sin semillas van al final y la lista muestra los puntos.\nEl botón «Mis solicitudes» ya no se pierde al navegar.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/Arata12/Jellyfin-Acquisition/releases/download/v1.5.2.0/Jellyfind_1.5.2.0.zip",
+        "checksum": "e30daac50f3e7c7282d1d42cb0c7dc4b",
+        "timestamp": "2026-11-05T06:26:38.0000000Z"
+      },
+      {
         "version": "1.5.1.0",
         "changelog": "Límite ligero de solicitudes en curso por usuario (10 por defecto, 0 = sin límite), automático y sin aprobación. Incluye 1.5.0.0: «Tus solicitudes», aviso en la cabecera, resultados por parecido, botón «Pedir episodios que faltan», mensajes en español y cancelar borrando lo descargado.",
         "targetAbi": "12.2.0.0",
