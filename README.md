@@ -1,4 +1,4 @@
-# Jellyfin Acquisition
+# Jellyfind
 
 Plugin para **Jellyfin 12.2 – 12.4** que permite buscar y pedir series y películas que todavía no están en tu biblioteca, directamente desde el buscador de Jellyfin. El plugin se encarga del resto: registra el título en Sonarr o Radarr, busca la mejor release en Prowlarr, la envía a qBittorrent, espera a que Sonarr/Radarr la importe y comprueba que Jellyfin la detecta.
 
@@ -76,17 +76,17 @@ En Prowlarr, los indexadores que admiten **búsqueda por ID** (TVDB/TMDB/IMDb) m
    ```
    https://raw.githubusercontent.com/Arata12/Jellyfin-Acquisition/main/manifest.json
    ```
-2. En el **Catálogo**, instala *Acquisition* y reinicia Jellyfin.
+2. En el **Catálogo**, instala *Jellyfind* y reinicia Jellyfin.
 
-Las versiones nuevas aparecen como actualización en Jellyfin. Si antes lo instalaste a mano, borra primero la carpeta `plugins/Acquisition` para no tener dos copias.
+Las versiones nuevas aparecen como actualización en Jellyfin. Si antes lo instalaste a mano, borra primero la carpeta `plugins/Acquisition` (el nombre anterior del plugin) para no tener dos copias.
 
 Cada versión se publica sola al subir su etiqueta (`git tag v1.5.1.0 && git push origin v1.5.1.0`): GitHub Actions pasa las pruebas, compila, crea la Release con el zip y añade la versión a `manifest.json`. La etiqueta debe coincidir con la versión del `.csproj`. El changelog es el mensaje de la etiqueta si es anotada (`git tag -a v1.5.1.0 -m "…"`) o, si no, el título del commit etiquetado.
 
 ### Manual
 
-1. Descarga el zip de la [última Release](https://github.com/Arata12/Jellyfin-Acquisition/releases/latest) o compila el plugin (ver [Compilar](#compilar)), y crea una carpeta `Acquisition` con estos archivos:
+1. Descarga el zip de la [última Release](https://github.com/Arata12/Jellyfin-Acquisition/releases/latest) o compila el plugin (ver [Compilar](#compilar)), y crea una carpeta `Jellyfind` con estos archivos:
    ```
-   Acquisition/
+   Jellyfind/
    ├── Jellyfin.Plugin.Acquisition.dll
    ├── Jellyfin.Plugin.Acquisition.deps.json
    ├── Jellyfin.Plugin.Acquisition.pdb
@@ -94,16 +94,16 @@ Cada versión se publica sola al subir su etiqueta (`git tag v1.5.1.0 && git pus
    └── meta.json
    ```
 2. **Detén Jellyfin.** Copiar la DLL con el servidor en marcha puede corromperla en memoria.
-3. Copia la carpeta `Acquisition` dentro de la carpeta `plugins` de Jellyfin:
-   - Docker: `/config/plugins/Acquisition/`
-   - Paquete de Linux: `/var/lib/jellyfin/plugins/Acquisition/`
+3. Copia la carpeta `Jellyfind` dentro de la carpeta `plugins` de Jellyfin:
+   - Docker: `/config/plugins/Jellyfind/`
+   - Paquete de Linux: `/var/lib/jellyfin/plugins/Jellyfind/`
 
-   Si tenías una versión anterior del plugin, borra antes su carpeta (puede llamarse `Acquisition` o `Acquisition_<versión>`).
-4. Arranca Jellyfin. En **Panel de control → Complementos** debe aparecer *Acquisition* como activo.
+   Si tenías una versión anterior del plugin, borra antes su carpeta (puede llamarse `Jellyfind`, `Jellyfind_<versión>`, o con el nombre anterior `Acquisition` o `Acquisition_<versión>`).
+4. Arranca Jellyfin. En **Panel de control → Complementos** debe aparecer *Jellyfind* como activo.
 
 ## Configuración
 
-En **Panel de control → Complementos → Acquisition**:
+En **Panel de control → Complementos → Jellyfind**:
 
 1. **Conexiones:** URL y API key de Sonarr, Radarr y Prowlarr, y URL, usuario y contraseña de qBittorrent.
 2. Pulsa **«Cargar opciones desde servicios»**. El plugin lee de Sonarr y Radarr sus carpetas raíz, perfiles de calidad y clientes de descarga.

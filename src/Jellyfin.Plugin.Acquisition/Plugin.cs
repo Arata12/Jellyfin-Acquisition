@@ -33,11 +33,11 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 
     public static Plugin? Instance { get; private set; }
 
-    public override string Name => "Acquisition";
+    public override string Name => "Jellyfind";
 
     public override Guid Id => PluginGuid;
 
-    public override string Description => "Plugin de adquisición de medios para Jellyfin 12.2";
+    public override string Description => "Busca y pide series y películas desde Jellyfin con Sonarr, Radarr, Prowlarr y qBittorrent";
 
     public IEnumerable<PluginPageInfo> GetPages()
     {
@@ -45,7 +45,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         [
             new PluginPageInfo
             {
-                Name = "Acquisition",
+                Name = "Jellyfind",
                 EmbeddedResourcePath = string.Format(
                     System.Globalization.CultureInfo.InvariantCulture,
                     "{0}.Configuration.config.html",

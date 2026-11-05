@@ -29,6 +29,13 @@ public class SeerrApiTests : IDisposable
         _testDir = Path.Combine(Path.GetTempPath(), "Acquisition_Seerr_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testDir);
         _appPaths.Setup(p => p.PluginConfigurationsPath).Returns(_testDir);
+        _appPaths.Setup(p => p.PluginsPath).Returns(_testDir);
+
+        // Plugin.Instance es estático: sin esto, estos tests heredan los destinos que dejó otra clase
+        var xml = new Mock<MediaBrowser.Model.Serialization.IXmlSerializer>();
+        xml.Setup(x => x.DeserializeFromFile(typeof(Configuration.PluginConfiguration), It.IsAny<string>()))
+            .Returns(new Configuration.PluginConfiguration());
+        _ = new Plugin(_appPaths.Object, xml.Object);
     }
 
     public void Dispose()

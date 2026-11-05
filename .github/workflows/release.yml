@@ -65,31 +65,31 @@ jobs:
           mkdir -p package
           cp "$OUT"/Jellyfin.Plugin.Acquisition.{dll,deps.json,pdb,xml} package/
           python3 .github/scripts/manifest.py meta "$VERSION" package/meta.json
-          (cd package && zip -r "../Acquisition_$VERSION.zip" .)
-          sha256sum "Acquisition_$VERSION.zip" > "Acquisition_$VERSION.zip.sha256"
-          cat "Acquisition_$VERSION.zip.sha256"
+          (cd package && zip -r "../Jellyfind_$VERSION.zip" .)
+          sha256sum "Jellyfind_$VERSION.zip" > "Jellyfind_$VERSION.zip.sha256"
+          cat "Jellyfind_$VERSION.zip.sha256"
 
       - name: Publicar la Release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "Acquisition_$VERSION.zip" "Acquisition_$VERSION.zip.sha256" \
-            --title "Acquisition $VERSION" \
+          gh release create "$GITHUB_REF_NAME" "Jellyfind_$VERSION.zip" "Jellyfind_$VERSION.zip.sha256" \
+            --title "Jellyfind $VERSION" \
             --generate-notes \
-            --notes "Instalación: añade el repositorio https://raw.githubusercontent.com/${{ github.repository }}/main/manifest.json en Jellyfin (Panel de control → Complementos → Repositorios), o crea la carpeta plugins/Acquisition y descomprime el zip dentro. Compatible con Jellyfin 12.2 a 12.4."
+            --notes "Instalación: añade el repositorio https://raw.githubusercontent.com/${{ github.repository }}/main/manifest.json en Jellyfin (Panel de control → Complementos → Repositorios), o crea la carpeta plugins/Jellyfind y descomprime el zip dentro. Compatible con Jellyfin 12.2 a 12.4."
 
       - name: Actualizar manifest.json
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          ZIP_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/Acquisition_${{ steps.version.outputs.version }}.zip
+          ZIP_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/Jellyfind_${{ steps.version.outputs.version }}.zip
         run: |
           git fetch origin main
           git worktree add ../main origin/main
-          python3 .github/scripts/manifest.py manifest "$VERSION" "Acquisition_$VERSION.zip" "$ZIP_URL" ../main/manifest.json
+          python3 .github/scripts/manifest.py manifest "$VERSION" "Jellyfind_$VERSION.zip" "$ZIP_URL" ../main/manifest.json
           cd ../main
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add manifest.json
-          git commit -m "manifest.json: Acquisition $VERSION"
+          git commit -m "manifest.json: Jellyfind $VERSION"
           git push origin HEAD:main

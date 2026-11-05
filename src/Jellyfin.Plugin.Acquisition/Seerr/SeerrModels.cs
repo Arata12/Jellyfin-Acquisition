@@ -47,7 +47,7 @@ public static class SeerrJson
 public class SeerrPublicSettingsDto
 {
     public bool Initialized { get; set; } = true;
-    public string ApplicationTitle { get; set; } = "Acquisition";
+    public string ApplicationTitle { get; set; } = "Jellyfind";
     public bool LocalLogin { get; set; }
     public bool MediaServerLogin { get; set; } = true;
 

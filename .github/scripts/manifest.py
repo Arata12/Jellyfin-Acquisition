@@ -14,7 +14,7 @@ import os
 import sys
 
 GUID = "e2a567a4-0c6d-4789-9a72-f672d24268b8"  # Plugin.PluginGuid
-NAME = "Acquisition"
+NAME = "Jellyfind"
 TARGET_ABI = "12.2.0.0"  # versión de Jellyfin.Controller del .csproj
 DESCRIPTION = "Busca y pide series y películas desde Jellyfin con Sonarr, Radarr, Prowlarr y qBittorrent"
 OVERVIEW = "Pide series y películas que no están en tu biblioteca"

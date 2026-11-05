@@ -1,7 +1,7 @@
 [
   {
     "guid": "e2a567a4-0c6d-4789-9a72-f672d24268b8",
-    "name": "Acquisition",
+    "name": "Jellyfind",
     "description": "Busca y pide series y películas desde Jellyfin con Sonarr, Radarr, Prowlarr y qBittorrent",
     "overview": "Pide series y películas que no están en tu biblioteca",
     "owner": "Arata12",

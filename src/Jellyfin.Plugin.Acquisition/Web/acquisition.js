@@ -719,7 +719,7 @@
                 </div>
                 <div class="acquisition-empty">
                     <p style="margin: 0 0 10px 0; color: #bbb;">${escapeHtml(msg)}</p>
-                    ${isNotConfigured ? '<p><a href="#!/configurationpage?name=Acquisition" style="color: #00a4dc; text-decoration: underline;">Configurar catálogo externo en el panel de administración</a></p>' : ''}
+                    ${isNotConfigured ? '<p><a href="#!/configurationpage?name=Jellyfind" style="color: #00a4dc; text-decoration: underline;">Configurar catálogo externo en el panel de administración</a></p>' : ''}
                     <button id="btn-retry-catalog" class="acquisition-btn-secondary" style="margin-top: 10px;">Reintentar búsqueda</button>
                 </div>
             `;
