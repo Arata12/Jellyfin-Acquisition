@@ -1,0 +1,95 @@
+# Compila, prueba y publica el plugin como Release de GitHub al subir una etiqueta de versión,
+# y añade la versión al manifest.json del repositorio de plugins de Jellyfin.
+#   git tag v1.5.1.0 && git push origin v1.5.1.0
+# La etiqueta debe coincidir con <Version> del .csproj (sin la "v").
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write  # crear la Release, adjuntar el zip y actualizar manifest.json en main
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # historial completo para las notas de la Release
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Comprobar que la etiqueta coincide con la versión
+        id: version
+        run: |
+          VERSION=$(grep -oP '(?<=<Version>)[^<]+' src/Jellyfin.Plugin.Acquisition/Jellyfin.Plugin.Acquisition.csproj)
+          if [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión $VERSION del .csproj"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Changelog: el mensaje de la etiqueta si es anotada (git tag -a v1.5.1.0 -m "…"),
+      # si no, el título del commit etiquetado
+      - name: Changelog
+        run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          if [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" = tag ]; then
+            TEXT=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")
+          else
+            TEXT=$(git log -1 --format=%s "$GITHUB_REF_NAME")
+          fi
+          { echo 'CHANGELOG<<EOF_CHANGELOG'; echo "$TEXT"; echo 'EOF_CHANGELOG'; } >> "$GITHUB_ENV"
+
+      # Las pruebas del cliente web usan Node, que ya viene en las máquinas de GitHub
+      - name: Pruebas
+        run: dotnet test tests/Jellyfin.Plugin.Acquisition.Tests -c Release
+
+      - name: Compilar
+        run: dotnet build src/Jellyfin.Plugin.Acquisition -c Release --no-incremental
+
+      # Zip plano (los archivos en la raíz): es lo que espera el instalador de Jellyfin
+      - name: Empaquetar
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          OUT=src/Jellyfin.Plugin.Acquisition/bin/Release/net10.0
+          mkdir -p package
+          cp "$OUT"/Jellyfin.Plugin.Acquisition.{dll,deps.json,pdb,xml} package/
+          python3 .github/scripts/manifest.py meta "$VERSION" package/meta.json
+          (cd package && zip -r "../Acquisition_$VERSION.zip" .)
+          sha256sum "Acquisition_$VERSION.zip" > "Acquisition_$VERSION.zip.sha256"
+          cat "Acquisition_$VERSION.zip.sha256"
+
+      - name: Publicar la Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "Acquisition_$VERSION.zip" "Acquisition_$VERSION.zip.sha256" \
+            --title "Acquisition $VERSION" \
+            --generate-notes \
+            --notes "Instalación: añade el repositorio https://raw.githubusercontent.com/${{ github.repository }}/main/manifest.json en Jellyfin (Panel de control → Complementos → Repositorios), o crea la carpeta plugins/Acquisition y descomprime el zip dentro. Compatible con Jellyfin 12.2 a 12.4."
+
+      - name: Actualizar manifest.json
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ZIP_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/Acquisition_${{ steps.version.outputs.version }}.zip
+        run: |
+          git fetch origin main
+          git worktree add ../main origin/main
+          python3 .github/scripts/manifest.py manifest "$VERSION" "Acquisition_$VERSION.zip" "$ZIP_URL" ../main/manifest.json
+          cd ../main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "manifest.json: Acquisition $VERSION"
+          git push origin HEAD:main

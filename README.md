@@ -70,7 +70,21 @@ En Prowlarr, los indexadores que admiten **búsqueda por ID** (TVDB/TMDB/IMDb) m
 
 ## Instalación
 
-1. Compila el plugin (ver [Compilar](#compilar)) y crea una carpeta `Acquisition` con estos archivos:
+### Desde el repositorio de plugins (recomendado)
+
+1. En **Panel de control → Complementos → Repositorios**, añade un repositorio con esta URL:
+   ```
+   https://raw.githubusercontent.com/Arata12/Jellyfin-Acquisition/main/manifest.json
+   ```
+2. En el **Catálogo**, instala *Acquisition* y reinicia Jellyfin.
+
+Las versiones nuevas aparecen como actualización en Jellyfin. Si antes lo instalaste a mano, borra primero la carpeta `plugins/Acquisition` para no tener dos copias.
+
+Cada versión se publica sola al subir su etiqueta (`git tag v1.5.1.0 && git push origin v1.5.1.0`): GitHub Actions pasa las pruebas, compila, crea la Release con el zip y añade la versión a `manifest.json`. La etiqueta debe coincidir con la versión del `.csproj`. El changelog es el mensaje de la etiqueta si es anotada (`git tag -a v1.5.1.0 -m "…"`) o, si no, el título del commit etiquetado.
+
+### Manual
+
+1. Descarga el zip de la [última Release](https://github.com/Arata12/Jellyfin-Acquisition/releases/latest) o compila el plugin (ver [Compilar](#compilar)), y crea una carpeta `Acquisition` con estos archivos:
    ```
    Acquisition/
    ├── Jellyfin.Plugin.Acquisition.dll
