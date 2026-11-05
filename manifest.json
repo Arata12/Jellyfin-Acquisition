@@ -1,0 +1,20 @@
+[
+  {
+    "guid": "e2a567a4-0c6d-4789-9a72-f672d24268b8",
+    "name": "Acquisition",
+    "description": "Busca y pide series y películas desde Jellyfin con Sonarr, Radarr, Prowlarr y qBittorrent",
+    "overview": "Pide series y películas que no están en tu biblioteca",
+    "owner": "Arata12",
+    "category": "General",
+    "versions": [
+      {
+        "version": "1.5.1.0",
+        "changelog": "Límite ligero de solicitudes en curso por usuario (10 por defecto, 0 = sin límite), automático y sin aprobación. Incluye 1.5.0.0: «Tus solicitudes», aviso en la cabecera, resultados por parecido, botón «Pedir episodios que faltan», mensajes en español y cancelar borrando lo descargado.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/Arata12/Jellyfin-Acquisition/releases/download/v1.5.1.0/Acquisition_1.5.1.0.zip",
+        "checksum": "727fa8a8b5f602f09afbaae36db8d568",
+        "timestamp": "2026-11-05T00:54:57.0000000Z"
+      }
+    ]
+  }
+]
