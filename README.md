@@ -138,6 +138,24 @@ Si usas Abyss, carga una versión fija del tema (un commit concreto) en lugar de
 
 El repositorio incluye un tema para Jellyfin Web 12.x inspirado en la interfaz de plezy, en [`theme/jellyfind.css`](theme/jellyfind.css). Tiene fondo casi negro, el blanco como único acento (botón «Reproducir» en píldora blanca, vista activa blanca) y chips y botones redondeados. En la ficha de un título, la imagen de fondo y el logo hacen de portada y no se muestra el póster. También ajusta los colores del plugin para que el buscador y los modales encajen.
 
+**PC**
+
+| Inicio | Ficha de una serie |
+| --- | --- |
+| ![Inicio en PC](theme/capturas/pc-inicio.jpg) | ![Ficha de una serie en PC](theme/capturas/pc-serie.jpg) |
+| **Temporada y episodios** | **Tarjeta normal y con el ratón encima** |
+| ![Temporada en PC](theme/capturas/pc-temporada.jpg) | ![Tarjeta en hover](theme/capturas/pc-hover.jpg) |
+
+Con el ratón encima solo se acerca la imagen; los indicadores, la barra de progreso y los botones no se mueven.
+
+**Móvil**
+
+<p>
+  <img src="theme/capturas/movil-inicio.jpg" alt="Inicio en móvil" width="32%">
+  <img src="theme/capturas/movil-serie.jpg" alt="Ficha de una serie en móvil" width="32%">
+  <img src="theme/capturas/movil-temporada.jpg" alt="Temporada en móvil" width="32%">
+</p>
+
 Para usarlo, pon esto en **Panel de control → General → CSS personalizado**, en lugar de otro tema:
 
 ```css
