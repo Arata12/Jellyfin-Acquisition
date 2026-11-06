@@ -73,6 +73,7 @@ html:root {
     --jf-palette-SnackbarContent-bg: rgb(var(--jfd-accent));
     --jf-palette-SnackbarContent-color: rgb(var(--jfd-on-accent));
     --jf-shape-borderRadius: 12px;
+    --jf-card-borderRadius: var(--jfd-radius);
 }
 
 .MuiButton-contained,
@@ -169,6 +170,33 @@ body {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     border-bottom-color: transparent;
+}
+
+/* Al bajar por la ficha, la cabecera transparente se vuelve cristal oscuro poco a poco para que
+   el contenido no pase por debajo de los iconos (solo navegadores con animaciones ligadas al scroll;
+   en el resto se queda como está) */
+@keyframes jfd-header-solid {
+    to {
+        opacity: 1;
+    }
+}
+
+@supports (animation-timeline: scroll()) {
+    body:has(.itemDetailPage:not(.hide)) .MuiAppBar-root::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        opacity: 0;
+        background: rgb(var(--jfd-bg) / 0.78);
+        -webkit-backdrop-filter: blur(18px) saturate(1.2);
+        backdrop-filter: blur(18px) saturate(1.2);
+        border-bottom: 1px solid rgb(255 255 255 / 0.05);
+        animation: jfd-header-solid linear both;
+        animation-timeline: scroll(root block);
+        animation-range: 30vh 45vh;
+    }
 }
 
 .MuiAppBar-root {
@@ -336,6 +364,7 @@ body {
     color: rgb(var(--jfd-text-2));
 }
 
+/* Tarjeta: esquinas suaves, sin sombra y con un filo casi invisible (como plezy) */
 .cardScalable,
 .cardContent,
 .cardImageContainer,
@@ -348,50 +377,14 @@ body {
 
 .cardScalable {
     background: rgb(var(--jfd-surface)) !important;
-    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.05);
     overflow: hidden;
-}
-
-/* Imagen que se acerca un poco al pasar el ratón (dentro de la tarjeta, sin salirse de la fila) */
-.cardScalable .cardImageContainer.coveredImage,
-.cardScalable .cardContent .cardImageContainer {
-    transition: transform 0.6s var(--jfd-ease);
-}
-
-/* Aro del hover: por dentro de la tarjeta, así ninguna fila lo recorta */
-.cardScalable::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    box-shadow: inset 0 0 0 2px rgb(var(--jfd-accent) / 0.85);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s var(--jfd-ease);
-    z-index: 2;
 }
 
 .cardContent-shadow,
 .cardBox-focustransform,
-.cardPadder {
+.cardPadder,
+.cardBox:not(.visualCardBox) .cardPadder {
     box-shadow: none !important;
-}
-
-@media (hover: hover) {
-    .card-hoverable:hover .cardScalable .cardImageContainer.coveredImage,
-    .card-hoverable:hover .cardScalable .cardContent .cardImageContainer {
-        transform: scale(1.05);
-    }
-
-    .card-hoverable:hover .cardScalable::after {
-        opacity: 1;
-    }
-}
-
-/* Teclado o mando: el mismo aro con foco visible */
-.card:focus-visible .cardScalable::after,
-.layout-tv .card:focus .cardScalable::after {
-    opacity: 1;
 }
 
 .cardBox,
@@ -400,115 +393,348 @@ body {
     border: 0 !important;
 }
 
+/* Al pasar el ratón solo se acerca la imagen. La imagen es el fondo del enlace que también
+   contiene los indicadores (episodios sin ver, visto, progreso); escalar el enlace los agrandaría.
+   Un ::before hereda ese fondo, queda detrás de los indicadores y es lo único que se escala. */
+.cardScalable .cardImageContainer {
+    isolation: isolate;
+}
+
+.cardScalable .cardImageContainer:not(.coveredImage-contain)::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: inherit;
+    background-position: inherit;
+    background-size: inherit;
+    background-repeat: no-repeat;
+    pointer-events: none;
+    transition: transform 0.7s var(--jfd-ease);
+}
+
+/* Filo de 1px en reposo que pasa a aro blanco en hover/foco; va por dentro, así ninguna fila lo recorta */
+.cardScalable::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.07);
+    pointer-events: none;
+    transition: box-shadow 0.35s var(--jfd-ease);
+    z-index: 2;
+}
+
+/* Las tarjetas React (bibliotecas) usan un <img> en vez de un fondo: se escala solo él */
+.cardScalable .cardImageContainer img {
+    transition: transform 0.7s var(--jfd-ease) !important;
+}
+
+@media (hover: hover) {
+    .card-hoverable:hover .cardScalable .cardImageContainer::before,
+    .card-hoverable:hover .cardScalable .cardImageContainer img {
+        transform: scale(1.06);
+    }
+
+    .card-hoverable:hover .cardScalable::after {
+        box-shadow: inset 0 0 0 2px rgb(var(--jfd-accent) / 0.9);
+    }
+}
+
+/* Teclado o mando: el mismo aro con foco visible */
+.card:focus-visible .cardScalable::after,
+.layout-tv .card:focus .cardScalable::after {
+    box-shadow: inset 0 0 0 2px rgb(var(--jfd-accent) / 0.9);
+}
+
 /* Sin velo sobre la imagen: solo un degradado abajo, detrás de los botones */
 .cardOverlayContainer {
-    background: linear-gradient(to top, rgb(0 0 0 / 0.6), transparent 38%) !important;
+    background: linear-gradient(to top, rgb(0 0 0 / 0.65), rgb(0 0 0 / 0.15) 32%, transparent 55%) !important;
     border: 0 !important;
     transition: opacity 0.3s var(--jfd-ease) !important;
 }
 
-.cardOverlayButton,
-.cardOverlayFab-primary {
+/* Botones pequeños del hover (visto, favorito, más): círculos de cristal oscuro, legibles
+   también sobre pósters claros */
+.cardOverlayButton-br {
+    gap: 6px;
+    padding: 0 8px 8px 0;
+}
+
+.cardOverlayButton-br .cardOverlayButton {
+    width: 32px;
+    height: 32px;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border-radius: 999px !important;
+    background: rgb(0 0 0 / 0.45) !important;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
+    color: #fff !important;
 }
 
-.cardOverlayButton:not(.cardOverlayFab-primary):hover {
-    background: rgb(255 255 255 / 0.16) !important;
+.cardOverlayButton-br .cardOverlayButtonIcon {
+    font-size: 18px !important;
+    color: inherit !important;
 }
 
-/* Botón de reproducir del hover: círculo blanco discreto, no un disco enorme */
-.cardOverlayFab-primary {
+.cardOverlayButton-br .cardOverlayButton:hover {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+}
+
+/* Visto y favorito activos (en las tarjetas React ambos usan el color de error: el visto se
+   reconoce por el trazo del icono de check) */
+.cardOverlayButton .playstatebutton-icon-played,
+.cardOverlayButton .MuiSvgIcon-colorError:has(path[d^="M9 16.17"]) {
+    color: #4ade80 !important;
+}
+
+.cardOverlayButton .MuiSvgIcon-root {
+    font-size: 18px !important;
+}
+
+.cardOverlayButton .ratingbutton-icon-withrating {
+    color: #ff5a6a !important;
+}
+
+/* Botón de reproducir del hover: círculo blanco que aparece creciendo */
+.cardOverlayContainer > .cardOverlayFab-primary {
+    font-size: 100% !important;
+    width: 52px !important;
+    height: 52px !important;
+    margin: -26px 0 0 -26px !important;
+    border-radius: 999px !important;
     background: rgb(var(--jfd-accent) / 0.94) !important;
     color: rgb(var(--jfd-on-accent)) !important;
-    box-shadow: 0 6px 20px rgb(0 0 0 / 0.45) !important;
-    transition: transform 0.3s var(--jfd-ease), background-color 0.3s var(--jfd-ease) !important;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.45) !important;
+    transform: scale(0.8);
+    transition: transform 0.4s var(--jfd-ease), background-color 0.3s var(--jfd-ease) !important;
 }
 
-.cardOverlayFab-primary:not(.MuiIconButton-root) {
-    font-size: 100% !important;
+.card-hoverable:hover .cardOverlayContainer > .cardOverlayFab-primary,
+.card-hoverable:focus-within .cardOverlayContainer > .cardOverlayFab-primary {
+    transform: scale(1);
 }
 
-.cardOverlayFab-primary.MuiIconButton-root {
+.cardOverlayContainer > .cardOverlayFab-primary:hover {
+    background: rgb(var(--jfd-accent)) !important;
     transform: scale(1.1) !important;
 }
 
-.cardOverlayFab-primary:hover {
-    background: rgb(var(--jfd-accent)) !important;
-}
-
-.cardOverlayFab-primary:not(.MuiIconButton-root):hover {
-    transform: scale(1.08);
-}
-
-.cardOverlayFab-primary.MuiIconButton-root:hover {
-    transform: scale(1.2) !important;
-}
-
+.cardOverlayFab-primary .cardOverlayButtonIcon,
 .cardOverlayFab-primary .material-icons,
 .cardOverlayFab-primary .MuiSvgIcon-root {
     color: rgb(var(--jfd-on-accent)) !important;
+    font-size: 30px !important;
 }
 
-.cardText,
-.cardText-first {
-    font-weight: 500;
-    color: rgb(var(--jfd-text)) !important;
+/* Indicadores (como plezy): círculo blanco de 24px arriba a la derecha que se alarga en píldora
+   con números de tres cifras; no cambian con el hover */
+.cardIndicators {
+    top: 8px !important;
+    right: 8px !important;
+    left: auto;
+    gap: 4px;
+    z-index: 3;
 }
 
-.cardText-secondary,
-.cardText:not(.cardText-first) {
-    color: rgb(var(--jfd-text-2)) !important;
-    font-size: 0.82em;
-}
-
-.cardFooter,
-.cardFooter .cardText,
-.card .cardText.cardTextCentered {
-    text-align: left !important;
-    justify-content: flex-start !important;
-    padding-left: 2px;
-}
-
-/* Contadores de no vistos: círculo blanco con número oscuro */
+.cardIndicators .indicator,
 .countIndicator,
-.indicator.countIndicator,
-.playedIndicator,
-.indicator {
+.playedIndicator {
+    box-sizing: border-box;
+    height: 24px !important;
+    min-width: 24px;
+    width: auto !important;
+    padding: 0 7px;
+    margin: 0 !important;
+    border-radius: 999px !important;
     background: rgb(var(--jfd-accent)) !important;
     color: rgb(var(--jfd-on-accent)) !important;
+    font-size: 12px !important;
     font-weight: 700 !important;
-    box-shadow: 0 2px 8px rgb(0 0 0 / 0.45);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.4) !important;
+}
+
+.cardIndicators .playedIndicator,
+.playedIndicator {
+    padding: 0 !important;
+    width: 24px !important;
 }
 
 .playedIndicator .material-icons,
 .indicator .material-icons,
 .indicatorIcon {
     color: rgb(var(--jfd-on-accent)) !important;
+    fill: currentColor !important;
+    font-size: 16px !important;
 }
 
-/* Barras de progreso finas y blancas */
+.indicator svg.indicatorIcon,
+.indicator > svg {
+    width: 16px !important;
+    height: 16px !important;
+}
+
+.missingIndicator,
+.unairedIndicator {
+    border-radius: 999px !important;
+    font-weight: 600;
+}
+
+.mediaSourceIndicator {
+    border-radius: 999px !important;
+    background: rgb(0 0 0 / 0.55) !important;
+    color: #fff !important;
+}
+
+/* Barra de progreso (como plezy): fina, a todo el ancho y pegada al borde inferior de la imagen,
+   con pista oscura para que se vea también sobre imágenes claras */
+.innerCardFooter {
+    background: transparent !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    max-width: none !important;
+}
+
+.innerCardFooter:has(.itemProgressBar) {
+    padding-top: 22px;
+    background: linear-gradient(to top, rgb(0 0 0 / 0.5), transparent) !important;
+}
+
+.innerCardFooter:has(.cardText) {
+    background: linear-gradient(to top, rgb(0 0 0 / 0.75), transparent) !important;
+}
+
 .itemProgressBar,
-.cardProgressBar,
-.innerCardFooter .itemProgressBar {
-    background: rgb(255 255 255 / 0.22) !important;
+.cardProgressBar {
+    background: rgb(0 0 0 / 0.55) !important;
     height: 4px !important;
     border-radius: 99px;
     overflow: hidden;
 }
 
-.itemProgressBarForeground {
-    background: rgb(var(--jfd-accent)) !important;
-    border-radius: 99px;
+.innerCardFooter .itemProgressBar {
+    border-radius: 0;
 }
 
-.innerCardFooter {
+.itemProgressBarForeground {
+    background: rgb(var(--jfd-accent)) !important;
+    border-radius: 0 99px 99px 0;
+}
+
+/* Textos bajo la tarjeta, alineados a la izquierda */
+.cardText,
+.cardText-first {
+    font-weight: 600;
+    color: rgb(var(--jfd-text)) !important;
+}
+
+.cardText-first {
+    padding-top: 0.5em !important;
+}
+
+.cardText-secondary,
+.cardText:not(.cardText-first) {
+    color: rgb(var(--jfd-text-2)) !important;
+    font-size: 0.8em;
+    font-weight: 500;
+}
+
+.cardFooter,
+.cardFooter .cardText,
+.card .cardText.cardTextCentered,
+.card .cardTextCentered > .textActionButton {
+    text-align: left !important;
+    justify-content: flex-start !important;
+    padding-left: 2px;
+}
+
+/* Tarjetas sin imagen: superficie neutra con el icono atenuado, en vez de los colores por defecto */
+.defaultCardBackground,
+.defaultCardBackground0,
+.defaultCardBackground1,
+.defaultCardBackground2,
+.defaultCardBackground3,
+.defaultCardBackground4,
+.defaultCardBackground5 {
+    background-color: rgb(var(--jfd-surface-2)) !important;
+}
+
+.cardImageIcon,
+.defaultCardBackground .cardImageIcon {
+    color: rgb(var(--jfd-text-2) / 0.6) !important;
+}
+
+/* Reparto: avatares redondos con el nombre centrado debajo (como plezy) */
+.personCard .cardPadder-overflowPortrait,
+.personCard .cardPadder-portrait {
+    padding-bottom: 100% !important;
+}
+
+.personCard .cardScalable,
+.personCard .cardScalable .cardContent,
+.personCard .cardScalable .cardImageContainer,
+.personCard .cardOverlayContainer,
+.personCard .blurhash-canvas {
+    border-radius: 50% !important;
+}
+
+.personCard .cardScalable .cardImageContainer {
+    background-position: center 25% !important;
+}
+
+.personCard .cardOverlayButton-br {
+    display: none;
+}
+
+.personCard .cardOverlayContainer {
     background: transparent !important;
+}
+
+.card.personCard .cardText,
+.card.personCard .cardTextCentered > .textActionButton {
+    text-align: center !important;
+    justify-content: center !important;
+    padding-left: 0;
 }
 
 /* Tarjetas de bibliotecas (Mis contenidos) */
 .overflowBackdropCard .cardImageContainer .cardText,
 .backdropCard .cardTextCentered {
     font-weight: 700;
+}
+
+/* Flechas de las filas: círculos grises */
+.emby-scrollbuttons {
+    gap: 6px;
+}
+
+.emby-scrollbuttons-button {
+    width: 34px;
+    height: 34px;
+    padding: 0 !important;
+    border-radius: 999px !important;
+    background: rgb(var(--jfd-surface-2)) !important;
+    color: rgb(var(--jfd-text)) !important;
+    transition: background-color 0.2s var(--jfd-ease), opacity 0.2s var(--jfd-ease);
+}
+
+.emby-scrollbuttons-button:hover:not(:disabled) {
+    background: rgb(var(--jfd-surface-3)) !important;
+}
+
+.emby-scrollbuttons-button:disabled {
+    opacity: 0.35;
+}
+
+.emby-scrollbuttons-button .material-icons {
+    font-size: 22px;
 }
 
 /* ---------- Ficha de serie o película ---------- */
@@ -588,6 +814,7 @@ body {
 }
 
 .layout-mobile .itemDetailPage .nameContainer,
+.layout-mobile .itemDetailPage .parentName,
 .layout-mobile .itemDetailPage .itemName,
 .layout-mobile .itemDetailPage .itemMiscInfo {
     text-align: left !important;
@@ -734,8 +961,9 @@ body {
 .overview,
 .detailSectionContent .overview {
     color: rgb(var(--jfd-text) / 0.86) !important;
-    line-height: 1.6;
+    line-height: 1.65;
     font-size: 1rem;
+    max-width: 75ch;
 }
 
 .itemGenres,
@@ -751,16 +979,60 @@ body {
     font-weight: 500;
 }
 
+/* «Ver más» pegado a la sinopsis, no al borde derecho de la página */
+.overview-controls {
+    justify-content: flex-start !important;
+    max-width: 75ch;
+    margin-top: 0.4em;
+}
+
+/* Etiquetas como chips (las comas y el rótulo son texto suelto: se ocultan con font-size 0) */
+.itemTags {
+    font-size: 0 !important;
+    display: flex;
+    flex-wrap: wrap;
+    margin: 1em 0 !important;
+    max-width: 960px;
+}
+
+.itemTags .button-link {
+    font-size: 0.78rem !important;
+    font-weight: 500 !important;
+    white-space: nowrap;
+    margin: 0 6px 6px 0 !important;
+    padding: 0.35em 0.85em !important;
+    border-radius: 999px !important;
+    background: rgb(var(--jfd-surface-2)) !important;
+    border: 1px solid rgb(255 255 255 / 0.05);
+    color: rgb(var(--jfd-text) / 0.85) !important;
+    transition: background-color 0.2s var(--jfd-ease), color 0.2s var(--jfd-ease);
+}
+
+.itemTags .button-link:hover {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+    text-decoration: none !important;
+}
+
 .overview-expand {
     border-radius: 999px !important;
     background: rgb(var(--jfd-surface-2)) !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+    padding: 0.45em 1.1em !important;
 }
 
-/* Episodios */
+/* Episodios: filas con miniatura redondeada que se acerca en hover (sin mover el botón de
+   reproducir, que vive dentro de la miniatura: mismo truco del ::before que en las tarjetas) */
 .listItem,
 .listItem-border {
-    border-radius: 14px !important;
+    border-radius: 16px !important;
     border: 0 !important;
+}
+
+.listItem-largeImage {
+    padding: 8px !important;
+    margin-bottom: 4px;
 }
 
 .listItem:hover,
@@ -770,13 +1042,127 @@ body {
 
 .listItemImage,
 .listItemImage-large {
-    border-radius: 10px !important;
+    border-radius: 12px !important;
     overflow: hidden;
+    isolation: isolate;
+}
+
+.listItemImage-large {
+    background-color: rgb(var(--jfd-surface-2));
+}
+
+.listItemImage-large::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: inherit;
+    background-position: inherit;
+    background-size: inherit;
+    background-repeat: no-repeat;
+    pointer-events: none;
+    transition: transform 0.7s var(--jfd-ease);
+}
+
+.listItemImage-large::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.07);
+    pointer-events: none;
+}
+
+/* Botón de reproducir de la miniatura: oculto hasta pasar el ratón, círculo blanco */
+.listItemImageButton {
+    background: rgb(var(--jfd-accent) / 0.94) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+    border-radius: 999px !important;
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
+    opacity: 0;
+    transform: scale(0.8);
+    transition: opacity 0.3s var(--jfd-ease), transform 0.4s var(--jfd-ease) !important;
+}
+
+.listItemImageButton .listItemImageButton-icon {
+    color: inherit !important;
+}
+
+.listItem:hover .listItemImageButton,
+.listItem:focus-within .listItemImageButton,
+.layout-mobile .listItemImageButton {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.listItemImageButton:hover {
+    background: rgb(var(--jfd-accent)) !important;
+    color: rgb(var(--jfd-on-accent)) !important;
+    transform: scale(1.1) !important;
+}
+
+@media (hover: hover) {
+    .listItem:hover .listItemImage-large::before {
+        transform: scale(1.06);
+    }
+}
+
+.listItem-largeImage .listItemBody {
+    padding-left: 1.1em !important;
+}
+
+.listItem-largeImage .listItemBodyText:first-child {
+    font-weight: 600;
+    font-size: 1.05rem;
+    margin-bottom: 0.2em;
+}
+
+.listItem .listItemMediaInfo {
+    gap: 0.9em;
+}
+
+.listItem .listItemMediaInfo .mediaInfoItem {
+    margin-right: 0 !important;
+}
+
+.listItem-overview {
+    line-height: 1.5 !important;
+    margin-top: 0.35em;
+}
+
+.listItemButton {
+    border-radius: 999px !important;
+    color: rgb(var(--jfd-text-2)) !important;
+    transition: background-color 0.2s var(--jfd-ease), color 0.2s var(--jfd-ease) !important;
+}
+
+.listItemButton:hover {
+    background: rgb(var(--jfd-surface-2)) !important;
+    color: rgb(var(--jfd-text)) !important;
+}
+
+.listItemButton .playstatebutton-icon-played {
+    color: #4ade80 !important;
+}
+
+.listItemButton .ratingbutton-icon-withrating {
+    color: #ff5a6a !important;
 }
 
 .listItemBodyText.secondary,
 .secondary {
     color: rgb(var(--jfd-text-2)) !important;
+}
+
+/* Nombre de la serie en la ficha de temporada/episodio: enlace sin subrayado */
+.itemDetailPage .parentName .button-link {
+    text-decoration: none !important;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.itemDetailPage .parentName .button-link:hover {
+    color: rgb(var(--jfd-text) / 0.8) !important;
 }
 
 /* Selector de temporadas/versiones de la ficha */
@@ -1117,10 +1503,9 @@ body:has(#videoOsdPage:not(.hide)) .skinHeader .MuiTypography-root {
         backdrop-filter: blur(var(--jfd-blur)) saturate(1.4);
     }
 
-    .cardOverlayButton:not(.cardOverlayFab-primary),
-    .indicator {
-        -webkit-backdrop-filter: blur(4px);
-        backdrop-filter: blur(4px);
+    .cardOverlayButton-br .cardOverlayButton {
+        -webkit-backdrop-filter: blur(8px);
+        backdrop-filter: blur(8px);
     }
 }
 
