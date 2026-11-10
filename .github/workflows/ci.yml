@@ -1,0 +1,33 @@
+# Compila y pasa las pruebas en cada push a main y en cada Pull Request,
+# para detectar fallos antes de publicar una versión.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Las pruebas del cliente web usan Node, que ya viene en las máquinas de GitHub
+      - name: Pruebas
+        run: dotnet test tests/Jellyfin.Plugin.Acquisition.Tests -c Release
+
+      - name: Compilar
+        run: dotnet build src/Jellyfin.Plugin.Acquisition -c Release --no-incremental
