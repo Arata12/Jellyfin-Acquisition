@@ -12,8 +12,8 @@
         "changelog": "El seguimiento de series refresca la fecha de emisión de los episodios pendientes con los datos actuales de Sonarr: si un episodio se retrasa o se adelanta, el próximo intento de búsqueda se programa en su fecha real en lugar de la guardada al pedir la serie.",
         "targetAbi": "12.2.0.0",
         "sourceUrl": "https://github.com/Arata12/Jellyfin-Acquisition/releases/download/v1.5.3.0/Jellyfind_1.5.3.0.zip",
-        "checksum": "ab6527939f5059ba1505f1c671928ea3",
-        "timestamp": "2026-11-11T04:09:57.0000000Z"
+        "checksum": "1f6e855f021d6ee1b82eea67303cbdee",
+        "timestamp": "2026-11-11T05:18:21.0000000Z"
       },
       {
         "version": "1.5.2.0",
