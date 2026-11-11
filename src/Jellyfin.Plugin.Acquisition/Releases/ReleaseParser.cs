@@ -99,4 +99,29 @@ public static class ReleaseParser
 
         return (-1, -1, false);
     }
+
+    /// <summary>
+    /// Name the torrent folder gets in qBittorrent: the release title, prefixed with the series
+    /// name when the title alone is a generic season name, so several series cannot mix.
+    /// </summary>
+    public static string TorrentFolderName(string? seriesTitle, string releaseTitle)
+    {
+        if (!IsGenericSeasonName(releaseTitle)) return releaseTitle;
+
+        var series = (seriesTitle ?? string.Empty).Trim();
+        return series.Length == 0 ? releaseTitle : $"{series} - {releaseTitle}";
+    }
+
+    /// <summary>True when the name is just "Season", "Temporada" or "Temp" with an optional number.</summary>
+    public static bool IsGenericSeasonName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+
+        var parts = name.Trim().ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0 || parts.Length > 2) return false;
+
+        var word = parts[0].TrimEnd('.', 'ª', 'º');
+        return word is "season" or "temporada" or "temp"
+            && (parts.Length == 1 || uint.TryParse(parts[1].TrimEnd('ª', 'º'), out _));
+    }
 }

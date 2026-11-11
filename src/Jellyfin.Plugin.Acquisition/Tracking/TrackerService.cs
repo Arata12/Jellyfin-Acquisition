@@ -759,7 +759,10 @@ public class TrackerService : ITrackerService
         }
         else if (existingTorrents.Count > 0)
         {
-            var nameMatches = existingTorrents.Where(t => string.Equals(t.Name, selected.Title, StringComparison.OrdinalIgnoreCase)).ToList();
+            var folderName = ReleaseParser.TorrentFolderName(request.Title, selected.Title);
+            var nameMatches = existingTorrents.Where(t =>
+                string.Equals(t.Name, selected.Title, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(t.Name, folderName, StringComparison.OrdinalIgnoreCase)).ToList();
             if (nameMatches.Count == 1)
             {
                 matchedExisting = nameMatches[0];
@@ -841,7 +844,9 @@ public class TrackerService : ITrackerService
             MagnetUri = fetchResult.MagnetUri ?? selected.MagnetUri,
             Category = request.Category,
             Tag = request.CorrelationTag,
-            Rename = selected.Title
+            // The rename replaces the torrent's original folder name; when the release title is a generic
+            // season name ("Season 1", "Temporada 1"), the series name is prepended so series do not mix
+            Rename = ReleaseParser.TorrentFolderName(request.Title, selected.Title)
         };
 
         // 4. Send to qBittorrent
