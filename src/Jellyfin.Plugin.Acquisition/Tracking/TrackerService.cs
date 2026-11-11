@@ -266,6 +266,10 @@ public class TrackerService : ITrackerService
             var now = DateTime.UtcNow;
             var local = GetLocalEpisodes(request, allEpisodes);
 
+            // Refresh pending units' air dates from the current Sonarr data, so the wait for unaired
+            // episodes tracks reschedules instead of the snapshot taken when the request was confirmed
+            RefreshUnitAirDates(request, allEpisodes);
+
             if (request.Scope.All)
             {
                 // Resolve All to explicit aired missing episodes (N01)
@@ -984,6 +988,25 @@ public class TrackerService : ITrackerService
 
     /// <summary>Longest interval between checks of a followed series when no air date is known.</summary>
     private static readonly TimeSpan FollowCheckInterval = TimeSpan.FromHours(6);
+
+    /// <summary>
+    /// Syncs each pending unit's air date with the current Sonarr data, so the wait for unaired episodes
+    /// tracks reschedules instead of the snapshot taken when the request was confirmed.
+    /// </summary>
+    private void RefreshUnitAirDates(AcquisitionRequest request, IReadOnlyList<SonarrEpisode> allEpisodes)
+    {
+        foreach (var unit in request.Units.Where(u => u.Status == RequestStatus.Pending && !u.IsFullSeasonPack))
+        {
+            var fresh = allEpisodes.FirstOrDefault(e => unit.EpisodeIds.Contains(e.Id))
+                ?? allEpisodes.FirstOrDefault(e => e.SeasonNumber == unit.SeasonNumber && unit.EpisodeNumbers.Contains(e.EpisodeNumber));
+            if (fresh == null || fresh.AirDateUtc == unit.AirDateUtc) continue;
+
+            _logger.LogDebug(
+                "Air date of {Unit} of request {Id} moved from {Old:dd/MM HH:mm} to {New:dd/MM HH:mm} UTC",
+                unit.Describe(request.Kind), request.Id, unit.AirDateUtc, fresh.AirDateUtc);
+            unit.AirDateUtc = fresh.AirDateUtc;
+        }
+    }
 
     /// <summary>
     /// Whether an episode has aired by <paramref name="cutoff"/>. An episode without a date counts as "to be announced"
