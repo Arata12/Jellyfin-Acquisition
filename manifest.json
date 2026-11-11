@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "1.5.4.0",
+        "changelog": "Primera versión con el nombre de la serie en la carpeta del torrent cuando la release usa un nombre genérico de temporada, para que varias series no se mezclen.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/Arata12/Jellyfin-Acquisition/releases/download/v1.5.4.0/Jellyfind_1.5.4.0.zip",
+        "checksum": "59183e05c7c7512c88de0f5a09dc51ea",
+        "timestamp": "2026-11-11T05:19:30.0000000Z"
+      },
+      {
         "version": "1.5.3.0",
         "changelog": "El seguimiento de series refresca la fecha de emisión de los episodios pendientes con los datos actuales de Sonarr: si un episodio se retrasa o se adelanta, el próximo intento de búsqueda se programa en su fecha real en lugar de la guardada al pedir la serie.",
         "targetAbi": "12.2.0.0",
