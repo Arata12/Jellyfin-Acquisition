@@ -67,6 +67,33 @@ public class ReleaseSelectionTests
         Assert.Equal(expectedPack, isPack);
     }
 
+    [Theory]
+    [InlineData("Season", true)]
+    [InlineData("Season 1", true)]
+    [InlineData("temporada", true)]
+    [InlineData("Temporada 2ª", true)]
+    [InlineData("temp. 3", true)]
+    [InlineData("Anime", false)]
+    [InlineData("Temporadas", false)]
+    [InlineData("Season Final", false)]
+    [InlineData("Show.Name.S01.1080p", false)]
+    [InlineData(null, false)]
+    public void IsGenericSeasonName_DetectsGenericSeasonTitles(string? name, bool expected)
+    {
+        Assert.Equal(expected, ReleaseParser.IsGenericSeasonName(name));
+    }
+
+    [Theory]
+    [InlineData("Season 1", "Tokyo Revengers", "Tokyo Revengers - Season 1")]
+    [InlineData("Season", "Tokyo Revengers", "Tokyo Revengers - Season")]
+    [InlineData("temporada 2ª", "Tokyo Revengers", "Tokyo Revengers - temporada 2ª")]
+    [InlineData("Tokyo.Revengers.S04.1080p.BluRay.x265", "Tokyo Revengers", "Tokyo.Revengers.S04.1080p.BluRay.x265")]
+    [InlineData("Anime", "Tokyo Revengers", "Anime")]
+    public void TorrentFolderName_PrefixesSeriesNameOnlyOnGenericSeasonTitles(string releaseTitle, string seriesTitle, string expected)
+    {
+        Assert.Equal(expected, ReleaseParser.TorrentFolderName(seriesTitle, releaseTitle));
+    }
+
     [Fact]
     public async Task SearchAndEvaluateReleases_FiltersNonTorrentAndScoresPreferences()
     {
