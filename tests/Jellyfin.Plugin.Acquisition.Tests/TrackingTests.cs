@@ -371,4 +371,65 @@ public class TrackingTests
         mockQb.Verify(q => q.AddTorrentAsync(It.IsAny<QBittorrentAddOptions>(), It.IsAny<CancellationToken>()), Times.Never);
         mockProwlarr.Verify(p => p.FetchTorrentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    [Fact]
+    public async Task ProcessRequest_PendingSeries_RefreshesUnitAirDate_FromCurrentSonarrData()
+    {
+        var mockRepo = new Mock<IRequestRepository>();
+        var mockSonarr = new Mock<ISonarrClient>();
+        var mockRadarr = new Mock<IRadarrClient>();
+        var mockProwlarr = new Mock<IProwlarrClient>();
+        var mockQb = new Mock<IQBittorrentClient>();
+        var mockRelease = new Mock<IReleaseService>();
+        var mockLocal = new Mock<ILocalMatcherService>();
+        var mockLibrary = new Mock<ILibraryManager>();
+        var mockLogger = new Mock<ILogger<TrackerService>>();
+
+        var staleAir = DateTime.UtcNow.AddDays(10);
+        var correctedAir = DateTime.UtcNow.AddDays(2);
+
+        var req = new AcquisitionRequest
+        {
+            Id = "req-stale-air-date",
+            Title = "Test Series",
+            Kind = MediaKind.Series,
+            Status = RequestStatus.Pending,
+            ArrId = 42,
+            UserId = Guid.NewGuid(),
+            FollowAiring = true,
+            Scope = new RequestScope { All = true }
+        };
+        req.Units.Add(new DownloadUnit
+        {
+            SeasonNumber = 4,
+            EpisodeNumbers = [7],
+            EpisodeIds = [507],
+            AirDateUtc = DateTime.SpecifyKind(staleAir, DateTimeKind.Utc),
+            Status = RequestStatus.Pending
+        });
+
+        // Sonarr now reports the episode airs two days out (rescheduled from the stale ten-day snapshot)
+        mockSonarr.Setup(s => s.GetEpisodesAsync(42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new SonarrEpisode { Id = 506, SeasonNumber = 4, EpisodeNumber = 6, AirDateUtc = DateTime.UtcNow.AddDays(-2) },
+                new SonarrEpisode { Id = 507, SeasonNumber = 4, EpisodeNumber = 7, AirDateUtc = DateTime.SpecifyKind(correctedAir, DateTimeKind.Utc) }
+            ]);
+
+        var tracker = new TrackerService(
+            mockRepo.Object,
+            mockSonarr.Object,
+            mockRadarr.Object,
+            mockProwlarr.Object,
+            mockQb.Object,
+            mockRelease.Object,
+            mockLocal.Object,
+            mockLibrary.Object,
+            mockLogger.Object);
+
+        await tracker.ProcessRequestAsync(req);
+
+        // The unit's air date is refreshed from Sonarr, and the next search is scheduled at air + grace
+        Assert.Equal(DateTime.SpecifyKind(correctedAir, DateTimeKind.Utc), req.Units[0].AirDateUtc);
+        Assert.Equal(new DateTimeOffset(DateTime.SpecifyKind(correctedAir.AddHours(1), DateTimeKind.Utc)), req.NextAttemptUtc);
+    }
 }
