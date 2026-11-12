@@ -265,6 +265,51 @@ public class ReleaseIdentityTests
         Assert.True(results.Single(r => r.Title == "Temporada 1").IsSeasonPack);
     }
 
+    [Fact]
+    public async Task SearchAndEvaluate_SeasonRequest_RejectsSpecials()
+    {
+        var request = GirlfriendGirlfriendE01();
+        request.Scope = new RequestScope { All = false, SeasonNumbers = [1] };
+
+        var mockProwlarr = new Mock<IProwlarrClient>();
+        mockProwlarr.Setup(p => p.SearchAsync(It.IsAny<ProwlarrSearchQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                Release("Kanojo.mo.Kanojo.S00.1080p.WEB-DL.x264", 900),
+                Release("Kanojo mo Kanojo - Especiales [1080p]", 800),
+                Release("Kanojo.mo.Kanojo.S01.720p.WEB-DL.x264", 3)
+            ]);
+
+        var service = new ReleaseService(mockProwlarr.Object, new Mock<ISonarrClient>().Object, new Mock<IRadarrClient>().Object, new Mock<ILogger<ReleaseService>>().Object);
+        var results = await service.SearchAndEvaluateReleasesAsync(request);
+
+        Assert.False(results.Single(r => r.Title.Contains("S00", StringComparison.Ordinal)).IsEligible);
+        Assert.Contains(results.Single(r => r.Title.Contains("S00", StringComparison.Ordinal)).RejectionReasons, r => r.Contains("otra temporada", StringComparison.Ordinal));
+        Assert.False(results.Single(r => r.Title.Contains("Especiales", StringComparison.Ordinal)).IsEligible);
+        Assert.Equal("Kanojo.mo.Kanojo.S01.720p.WEB-DL.x264", service.PickBestRelease(results)!.Title);
+    }
+
+    [Fact]
+    public async Task SearchAndEvaluate_SonarrMapsReleaseToSpecials_RejectsIt()
+    {
+        var mockProwlarr = new Mock<IProwlarrClient>();
+        mockProwlarr.Setup(p => p.SearchAsync(It.IsAny<ProwlarrSearchQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Release("Kanojo mo Kanojo - Christmas Special 1080p", 50)]);
+        var mockSonarr = new Mock<ISonarrClient>();
+        mockSonarr.Setup(s => s.ParseAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SonarrParseResult
+            {
+                Series = new SonarrSeries { Id = 7, TvdbId = 395486, Title = "Kanojo mo Kanojo" },
+                Episodes = [new SonarrEpisode { SeasonNumber = 0, EpisodeNumber = 1 }]
+            });
+
+        var service = new ReleaseService(mockProwlarr.Object, mockSonarr.Object, new Mock<IRadarrClient>().Object, new Mock<ILogger<ReleaseService>>().Object);
+        var results = await service.SearchAndEvaluateReleasesAsync(GirlfriendGirlfriendE01());
+
+        Assert.False(results.Single().IsEligible);
+        Assert.Contains(results.Single().RejectionReasons, r => r.Contains("otra temporada", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData(MediaKind.Series, "395486", "113137", null, 1, 3, "{TvdbId:395486}{TmdbId:113137}{Season:1}{Episode:3}")]
     [InlineData(MediaKind.Series, "395486", null, null, 2, null, "{TvdbId:395486}{Season:2}")]

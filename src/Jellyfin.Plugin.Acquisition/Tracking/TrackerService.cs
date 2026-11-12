@@ -537,7 +537,7 @@ public class TrackerService : ITrackerService
         if (activeUnit != null && activeUnit.SelectedRelease != null)
         {
             var isComp = true;
-            if (activeUnit.SeasonNumber > 0 && activeUnit.SelectedRelease.SeasonNumber > 0 && activeUnit.SelectedRelease.SeasonNumber != activeUnit.SeasonNumber)
+            if (activeUnit.SeasonNumber > 0 && activeUnit.SelectedRelease.SeasonNumber >= 0 && activeUnit.SelectedRelease.SeasonNumber != activeUnit.SeasonNumber)
             {
                 isComp = false;
             }

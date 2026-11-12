@@ -14,6 +14,7 @@ public static class ReleaseParser
 
     // "[Group] Title - 123 [1080p]" style absolute numbering used by anime releases
     private static readonly Regex AbsoluteEpisodeRegex = new(@"\s-\s(?<abs>\d{1,4})(?:v\d)?(?=[\s\[\(.]|$)", RegexOptions.Compiled);
+    private static readonly Regex SpecialsRegex = new(@"\b(?:specials|especiales)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex SeasonPackRegex = new(@"[sS]eason[\s._-]*(?<season>\d{1,2})|\btemporada[\s._-]*(?<season>\d{1,2})(?!\d)|[sS](?<season>\d{1,2})(?![eE\d])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex H264Regex = new(@"(?:x264|h264|h\.264|avc)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -102,6 +103,9 @@ public static class ReleaseParser
             var s = int.Parse(spMatch.Groups["season"].Value);
             return (s, -1, true);
         }
+
+        // "Specials" / "Especiales" without a season number: season 0
+        if (SpecialsRegex.IsMatch(title)) return (0, -1, true);
 
         return (-1, -1, false);
     }

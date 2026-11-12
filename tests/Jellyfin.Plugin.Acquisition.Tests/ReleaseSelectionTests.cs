@@ -66,6 +66,10 @@ public class ReleaseSelectionTests
     [InlineData("Serie Temporada 3 Capítulo 12 720p", 3, 12, false)]
     [InlineData("Serie - Temporada 3 [Cap.301_310]", 3, -1, true)]
     [InlineData("Serie - Temporadas", -1, -1, false)]
+    [InlineData("Show.Name.S00.1080p.WEB-DL", 0, -1, true)]
+    [InlineData("Show.Name.S00E03.1080p", 0, 3, false)]
+    [InlineData("Show Name Specials 1080p", 0, -1, true)]
+    [InlineData("Serie - Especiales [720p]", 0, -1, true)]
     public void ReleaseParser_ParseSeasonEpisode_CorrectlyIdentifies(string title, int expectedSeason, int expectedEpisode, bool expectedPack)
     {
         var (season, episode, isPack) = ReleaseParser.ParseSeasonEpisode(title);

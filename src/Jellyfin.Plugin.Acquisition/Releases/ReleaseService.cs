@@ -391,6 +391,11 @@ public class ReleaseService : IReleaseService
                         candidate.SeasonNumber = mapped.SeasonNumber;
                         candidate.EpisodeNumber = mapped.EpisodeNumber;
                     }
+                    else if (seriesMatches == true && parseResult.Episodes.Count > 0 && parseResult.Episodes.All(e => e.SeasonNumber == 0))
+                    {
+                        // Sonarr maps the release to specials even when its name does not say so
+                        candidate.SeasonNumber = 0;
+                    }
                 }
             }
             else if (request.Kind == MediaKind.Movie)
@@ -641,7 +646,8 @@ public class ReleaseService : IReleaseService
 
             if (targetSeason.HasValue)
             {
-                if (candidate.SeasonNumber > 0 && candidate.SeasonNumber != targetSeason.Value)
+                // Season 0 (specials) is a season too: never taken for the requested one (-1 = the name says none)
+                if (candidate.SeasonNumber >= 0 && candidate.SeasonNumber != targetSeason.Value)
                 {
                     reasons.Add($"Es otra temporada (S{candidate.SeasonNumber:D2}; se buscaba S{targetSeason.Value:D2}).");
                 }
