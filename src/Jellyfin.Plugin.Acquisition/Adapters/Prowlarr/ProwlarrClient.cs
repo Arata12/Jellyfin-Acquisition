@@ -9,13 +9,23 @@ namespace Jellyfin.Plugin.Acquisition.Adapters.Prowlarr;
 
 public class ProwlarrClient : IProwlarrClient
 {
+    /// <summary>Minimum time between the start of two searches (user decision: one search every 10 seconds).</summary>
+    public static readonly TimeSpan DefaultSearchInterval = TimeSpan.FromSeconds(10);
+
+    // Shared by every client instance: Prowlarr sends each search to all the indexers, so searches from the tracker,
+    // the release list and every request go one at a time and never in bursts
+    private static readonly SemaphoreSlim SearchGate = new(1, 1);
+    private static DateTime _lastSearchStartUtc = DateTime.MinValue;
+
     private readonly HttpClient _httpClient;
     private readonly ILogger<ProwlarrClient> _logger;
+    private readonly TimeSpan _searchInterval;
 
-    public ProwlarrClient(HttpClient httpClient, ILogger<ProwlarrClient> logger)
+    public ProwlarrClient(HttpClient httpClient, ILogger<ProwlarrClient> logger, TimeSpan? searchInterval = null)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _searchInterval = searchInterval ?? DefaultSearchInterval;
     }
 
     /// <summary>
@@ -66,6 +76,27 @@ public class ProwlarrClient : IProwlarrClient
     }
 
     public async Task<List<ProwlarrRelease>> SearchAsync(ProwlarrSearchQuery query, CancellationToken ct = default)
+    {
+        await SearchGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var wait = _lastSearchStartUtc + _searchInterval - DateTime.UtcNow;
+            if (wait > TimeSpan.Zero)
+            {
+                _logger.LogDebug("Waiting {Seconds:F1} s before the next Prowlarr search", wait.TotalSeconds);
+                await Task.Delay(wait, ct).ConfigureAwait(false);
+            }
+
+            _lastSearchStartUtc = DateTime.UtcNow;
+            return await SearchNowAsync(query, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            SearchGate.Release();
+        }
+    }
+
+    private async Task<List<ProwlarrRelease>> SearchNowAsync(ProwlarrSearchQuery query, CancellationToken ct)
     {
         try
         {

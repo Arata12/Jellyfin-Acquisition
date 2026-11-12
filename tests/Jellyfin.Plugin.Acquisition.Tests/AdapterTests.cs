@@ -3,8 +3,10 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 using Jellyfin.Plugin.Acquisition.Adapters.Prowlarr;
+using Jellyfin.Plugin.Acquisition.Adapters.Prowlarr.Models;
 using Jellyfin.Plugin.Acquisition.Adapters.Sonarr;
 using Jellyfin.Plugin.Acquisition.Configuration;
+using Jellyfin.Plugin.Acquisition.Models;
 
 namespace Jellyfin.Plugin.Acquisition.Tests;
 
@@ -91,6 +93,35 @@ public class AdapterTests
         var secondRequest = requests[1];
         Assert.Equal("external-tracker.org", secondRequest.RequestUri?.Host);
         Assert.False(secondRequest.Headers.Contains("X-Api-Key"));
+    }
+
+    [Fact]
+    public async Task ProwlarrClient_Search_RunsOneAtATime_SpacedByTheInterval_AcrossClients()
+    {
+        var interval = TimeSpan.FromMilliseconds(400);
+        var starts = new List<DateTime>();
+        var running = 0;
+        var overlapped = false;
+        var handler = new MockHttpMessageHandler(async (_, _) =>
+        {
+            lock (starts) starts.Add(DateTime.UtcNow);
+            if (Interlocked.Increment(ref running) > 1) overlapped = true;
+            await Task.Delay(50);
+            Interlocked.Decrement(ref running);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") };
+        });
+        // Two clients (as the tracker and the release list each get their own) share the same limit
+        var a = new ProwlarrClient(new HttpClient(handler), Mock.Of<ILogger<ProwlarrClient>>(), interval);
+        var b = new ProwlarrClient(new HttpClient(handler), Mock.Of<ILogger<ProwlarrClient>>(), interval);
+        var query = new ProwlarrSearchQuery { Query = "Dune", Kind = MediaKind.Movie };
+
+        await Task.WhenAll(a.SearchAsync(query), b.SearchAsync(query), a.SearchAsync(query));
+
+        Assert.False(overlapped);
+        Assert.Equal(3, starts.Count);
+        starts.Sort();
+        Assert.True(starts[1] - starts[0] >= interval - TimeSpan.FromMilliseconds(20), $"{(starts[1] - starts[0]).TotalMilliseconds} ms");
+        Assert.True(starts[2] - starts[1] >= interval - TimeSpan.FromMilliseconds(20), $"{(starts[2] - starts[1]).TotalMilliseconds} ms");
     }
 
     [Fact]

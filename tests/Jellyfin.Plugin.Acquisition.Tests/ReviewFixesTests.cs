@@ -444,7 +444,7 @@ public class ReviewFixesTests
     public async Task ProwlarrClient_SearchFailure_Throws()
     {
         UsePluginConfiguration(new PluginConfiguration { ProwlarrApiKey = "k" });
-        var client = new ProwlarrClient(new HttpClient(new StubHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError))), Mock.Of<ILogger<ProwlarrClient>>());
+        var client = new ProwlarrClient(new HttpClient(new StubHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError))), Mock.Of<ILogger<ProwlarrClient>>(), TimeSpan.Zero);
 
         await Assert.ThrowsAsync<ProwlarrUnavailableException>(() => client.SearchAsync(new ProwlarrSearchQuery { Query = "Dune", Kind = MediaKind.Movie }));
     }

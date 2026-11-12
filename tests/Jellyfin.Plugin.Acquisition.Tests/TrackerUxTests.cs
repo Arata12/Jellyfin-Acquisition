@@ -144,7 +144,7 @@ public class TrackerUxTests
     public async Task ProwlarrClient_SearchFailure_ExplainsInSpanish()
     {
         UsePluginConfiguration(new PluginConfiguration { ProwlarrApiKey = "k" });
-        var client = new ProwlarrClient(new HttpClient(new StubHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized))), Mock.Of<ILogger<ProwlarrClient>>());
+        var client = new ProwlarrClient(new HttpClient(new StubHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized))), Mock.Of<ILogger<ProwlarrClient>>(), TimeSpan.Zero);
 
         var ex = await Assert.ThrowsAsync<ProwlarrUnavailableException>(() => client.SearchAsync(new ProwlarrSearchQuery { Query = "Dune", Kind = MediaKind.Movie }));
 
