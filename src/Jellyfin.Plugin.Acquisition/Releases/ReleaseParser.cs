@@ -4,11 +4,17 @@ namespace Jellyfin.Plugin.Acquisition.Releases;
 
 public static class ReleaseParser
 {
-    private static readonly Regex SeasonEpisodeRegex = new(@"[sS](?<season>\d{1,2})[eE](?<episode>\d{1,4})|\b(?<season>\d{1,2})x(?<episode>\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    // SxxEyy, 1x02 and the Spanish forms "Temporada 3 Capítulo 2" and "Cap.302" (season + two-digit episode; a range
+    // such as "Cap.301_310" is not a single episode)
+    private static readonly Regex SeasonEpisodeRegex = new(
+        @"[sS](?<season>\d{1,2})[eE](?<episode>\d{1,4})|\b(?<season>\d{1,2})x(?<episode>\d{1,3})\b" +
+        @"|\btemporada[\s._-]*(?<season>\d{1,2})[\s._\-\[\]()]*(?:cap(?:[ií]tulo)?|episodio)\.?[\s._-]*(?<episode>\d{1,2})(?!\d)" +
+        @"|\bcap(?:[ií]tulo)?\.?[\s._-]*(?<season>\d{1,2})(?<episode>\d{2})(?![\d_-])",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // "[Group] Title - 123 [1080p]" style absolute numbering used by anime releases
     private static readonly Regex AbsoluteEpisodeRegex = new(@"\s-\s(?<abs>\d{1,4})(?:v\d)?(?=[\s\[\(.]|$)", RegexOptions.Compiled);
-    private static readonly Regex SeasonPackRegex = new(@"[sS]eason[\s._-]*(?<season>\d{1,2})|[sS](?<season>\d{1,2})(?![eE\d])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SeasonPackRegex = new(@"[sS]eason[\s._-]*(?<season>\d{1,2})|\btemporada[\s._-]*(?<season>\d{1,2})(?!\d)|[sS](?<season>\d{1,2})(?![eE\d])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex H264Regex = new(@"(?:x264|h264|h\.264|avc)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex H265Regex = new(@"(?:x265|h265|h\.265|hevc)", RegexOptions.IgnoreCase | RegexOptions.Compiled);

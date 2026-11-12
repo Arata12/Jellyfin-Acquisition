@@ -59,6 +59,13 @@ public class ReleaseSelectionTests
     [InlineData("Show.Name.2x05.720p.mkv", 2, 5, false)]
     [InlineData("Show.Name.Season.1.Complete.1080p", 1, -1, true)]
     [InlineData("Movie.Title.2020.1080p", -1, -1, false)]
+    [InlineData("Temporada 3", 3, -1, true)]
+    [InlineData("Serie - Temporada 3 [HDTV 720p][Cap.302][AC3 5.1 Castellano]", 3, 2, false)]
+    [InlineData("Serie [Cap.1012]", 10, 12, false)]
+    [InlineData("Serie Temporada 3 Capitulo 2", 3, 2, false)]
+    [InlineData("Serie Temporada 3 Capítulo 12 720p", 3, 12, false)]
+    [InlineData("Serie - Temporada 3 [Cap.301_310]", 3, -1, true)]
+    [InlineData("Serie - Temporadas", -1, -1, false)]
     public void ReleaseParser_ParseSeasonEpisode_CorrectlyIdentifies(string title, int expectedSeason, int expectedEpisode, bool expectedPack)
     {
         var (season, episode, isPack) = ReleaseParser.ParseSeasonEpisode(title);

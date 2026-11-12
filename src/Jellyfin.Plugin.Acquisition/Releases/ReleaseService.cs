@@ -140,6 +140,8 @@ public class ReleaseService : IReleaseService
             .OrderByDescending(c => c.IsEligible)
             .ThenByDescending(c => c.IdentityVerified && !c.IdentityRejected)
             .ThenByDescending(c => wantsWholeSeason && c.IsSeasonPack)
+            // A single episode was asked for: the episode itself before a whole season found by ID
+            .ThenByDescending(c => !(pQuery.Episode.HasValue && c.IsSeasonPack))
             .ThenByDescending(c => c.Seeders > 0)
             .ThenByDescending(c => c.Score)
             .ThenByDescending(c => c.Seeders)
@@ -653,9 +655,11 @@ public class ReleaseService : IReleaseService
                 }
                 else if (targetEpisode.HasValue)
                 {
+                    // The search by ID already asked the indexer for this episode (user decision: the ID decides), so
+                    // a release it returned is kept when its name says no episode or is the whole season
                     if (candidate.IsSeasonPack)
                     {
-                        reasons.Add("Es un pack de temporada y se buscaba un solo episodio.");
+                        if (!candidate.FromIdSearch) reasons.Add("Es un pack de temporada y se buscaba un solo episodio.");
                     }
                     else if (candidate.EpisodeNumber > 0 && candidate.EpisodeNumber != targetEpisode.Value)
                     {
@@ -674,7 +678,7 @@ public class ReleaseService : IReleaseService
                             reasons.Add($"Es otro episodio (número absoluto {candidate.AbsoluteEpisodeNumber}; se buscaba el {targetAbsolute.Value}).");
                         }
                     }
-                    else if (candidate.EpisodeNumber <= 0 && !candidate.IsSeasonPack)
+                    else if (candidate.EpisodeNumber <= 0 && !candidate.IsSeasonPack && !candidate.FromIdSearch)
                     {
                         reasons.Add("No indica qué episodio es y se buscaba uno concreto.");
                     }

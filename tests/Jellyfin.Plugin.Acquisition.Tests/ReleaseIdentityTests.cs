@@ -236,6 +236,35 @@ public class ReleaseIdentityTests
         Assert.Contains(results.Single().RejectionReasons, r => r.Contains("Es otr", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task SearchAndEvaluate_IdSearch_KeepsSpanishSeasonNamedReleasesForAnEpisode()
+    {
+        var mockProwlarr = new Mock<IProwlarrClient>();
+        mockProwlarr.Setup(p => p.SearchAsync(It.Is<ProwlarrSearchQuery>(q => !q.ById), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Release("Temporada 1", 50)]);
+        // The indexer answered the search by TVDB + S01E01: its releases are that episode whatever their names say
+        mockProwlarr.Setup(p => p.SearchAsync(It.Is<ProwlarrSearchQuery>(q => q.ById), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                Release("Temporada 1", 50),
+                Release("Kanojo mo Kanojo - Temporada 1 [HDTV 720p][Cap.101]", 5),
+                Release("Kanojo mo Kanojo 1080p", 7),
+                Release("Kanojo mo Kanojo - Temporada 2 [Cap.201]", 9)
+            ]);
+
+        var service = new ReleaseService(mockProwlarr.Object, new Mock<ISonarrClient>().Object, new Mock<IRadarrClient>().Object, new Mock<ILogger<ReleaseService>>().Object);
+        var results = await service.SearchAndEvaluateReleasesAsync(GirlfriendGirlfriendE01());
+
+        Assert.True(results.Single(r => r.Title == "Temporada 1").IsEligible);
+        Assert.True(results.Single(r => r.Title.Contains("Cap.101", StringComparison.Ordinal)).IsEligible);
+        Assert.True(results.Single(r => r.Title == "Kanojo mo Kanojo 1080p").IsEligible);
+        // Another season is still rejected
+        Assert.False(results.Single(r => r.Title.Contains("Cap.201", StringComparison.Ordinal)).IsEligible);
+        // The episodes before the whole season, despite its seeders
+        Assert.DoesNotContain(results.Take(2), r => r.IsSeasonPack);
+        Assert.True(results.Single(r => r.Title == "Temporada 1").IsSeasonPack);
+    }
+
     [Theory]
     [InlineData(MediaKind.Series, "395486", "113137", null, 1, 3, "{TvdbId:395486}{TmdbId:113137}{Season:1}{Episode:3}")]
     [InlineData(MediaKind.Series, "395486", null, null, 2, null, "{TvdbId:395486}{Season:2}")]
