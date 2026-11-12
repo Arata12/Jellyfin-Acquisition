@@ -1341,7 +1341,7 @@ public class TrackerService : ITrackerService
             ? item.StatusMessages.FirstOrDefault()?.Messages?.FirstOrDefault() ?? item.ErrorMessage ?? "importación bloqueada"
             : null;
 
-    private async Task<bool> CheckQueueDiagnosticsAsync(AcquisitionRequest request, DownloadUnit? activeUnit, CancellationToken ct)
+    private async Task<bool> CheckQueueDiagnosticsAsync(AcquisitionRequest request, DownloadUnit? activeUnit, CancellationToken ct, Func<Task<bool>>? warningIsExpected = null)
     {
         var targetHash = activeUnit?.TorrentHash ?? request.TorrentHash;
         var targetTag = activeUnit?.CorrelationTag ?? request.CorrelationTag;
@@ -1353,7 +1353,11 @@ public class TrackerService : ITrackerService
             if (queueItem != null)
             {
                 var msg = SonarrQueueProblem(queueItem);
-                if (msg != null)
+                if (msg != null && warningIsExpected != null && await warningIsExpected().ConfigureAwait(false))
+                {
+                    _logger.LogDebug("Sonarr warns about the download of request {Id} after importing part of it: {Message}", request.Id, msg);
+                }
+                else if (msg != null)
                 {
                     _logger.LogWarning("Sonarr queue reports a problem for request {Id}: {Message}", request.Id, msg);
                     await ParkUnitAsync(request, activeUnit, "Descarga detenida o con advertencia en Sonarr.", msg,
@@ -1420,8 +1424,10 @@ public class TrackerService : ITrackerService
         var targetHash = activeUnit?.TorrentHash ?? request.TorrentHash;
         var targetTag = activeUnit?.CorrelationTag ?? request.CorrelationTag;
 
-        // 1. Reconcile CDH queue diagnostics (H05)
-        if (await CheckQueueDiagnosticsAsync(request, activeUnit, ct).ConfigureAwait(false))
+        // 1. Reconcile CDH queue diagnostics (H05). Sonarr may import a pack and warn about the rest of it before this
+        // sees the torrent complete: with episodes of this download already in Sonarr, the importing step decides
+        // (it completes them or searches the missing ones on their own)
+        if (await CheckQueueDiagnosticsAsync(request, activeUnit, ct, () => AnyUnitEpisodeImportedAsync(request, activeUnit, ct)).ConfigureAwait(false))
         {
             return;
         }
@@ -1582,8 +1588,10 @@ public class TrackerService : ITrackerService
             }
         }
 
-        // Reconcile CDH queue diagnostics during importing (H05)
-        if (!episodesImported && await CheckQueueDiagnosticsAsync(request, activeUnit, ct).ConfigureAwait(false))
+        // Reconcile CDH queue diagnostics during importing (H05). With every download done (only Jellyfin's detection is
+        // left) there is nothing to diagnose: Sonarr keeps warning about a pack that had episodes already in the library
+        var allUnitsDone = request.Units.Count > 0 && activeUnit == null;
+        if (!episodesImported && !allUnitsDone && await CheckQueueDiagnosticsAsync(request, activeUnit, ct).ConfigureAwait(false))
         {
             return;
         }
@@ -1721,6 +1729,13 @@ public class TrackerService : ITrackerService
         }
 
         await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+    }
+
+    private async Task<bool> AnyUnitEpisodeImportedAsync(AcquisitionRequest request, DownloadUnit? unit, CancellationToken ct)
+    {
+        if (request.Kind != MediaKind.Series || !request.ArrId.HasValue || unit is not { EpisodeIds.Count: > 0 }) return false;
+        var episodes = await _sonarrClient.GetEpisodesAsync(request.ArrId.Value, ct).ConfigureAwait(false);
+        return episodes != null && episodes.Any(e => e.HasFile && unit.EpisodeIds.Contains(e.Id));
     }
 
     private async Task<bool> PackImportStalledAsync(AcquisitionRequest request, DownloadUnit unit, CancellationToken ct)

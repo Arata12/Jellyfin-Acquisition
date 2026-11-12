@@ -436,6 +436,74 @@ public class SeriesProgressTests
     }
 
     [Fact]
+    public async Task PartialPack_SonarrWarnsBeforeThePluginSeesTheTorrentComplete_StillSplitsTheMissingEpisode()
+    {
+        // Seen live: Sonarr imported the pack and warned while the request was still "downloading"
+        UseConfig(new PluginConfiguration());
+        var unit = ImportingPack(1, 2, 3);
+        unit.Status = RequestStatus.Downloading;
+        unit.ImportWaitStartedAt = null;
+        unit.CorrelationTag = "acq-req-series";
+        var req = Series(unit);
+        req.Status = RequestStatus.Downloading;
+        var sonarr = SonarrWith(Ep(1, 1, 1, hasFile: true), Ep(2, 1, 2, hasFile: true), Ep(3, 1, 3));
+        QueueWarns(sonarr, "One or more episodes expected in this release were not imported or missing from the release");
+        var qb = new Mock<IQBittorrentClient>();
+        qb.Setup(q => q.GetTorrentsInfoAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new QBittorrentTorrentInfo { Hash = "abc", Name = "Frieren S01 1080p", Progress = 1, State = "uploading", ContentPath = "/downloads/Frieren S01 1080p" }]);
+        var releases = ReleasesReturning(_ => []);
+        var tracker = Tracker(RepoFor(req), sonarr, releases, qb: qb);
+
+        await tracker.ProcessRequestAsync(req);
+        Assert.NotEqual(RequestStatus.RequiresAttention, unit.Status);
+        await tracker.ProcessRequestAsync(req);
+
+        Assert.Equal(RequestStatus.Available, unit.Status);
+        Assert.Equal([1, 2], unit.EpisodeIds);
+        Assert.Equal([3], req.Units[1].EpisodeIds);
+        Assert.NotEqual(RequestStatus.RequiresAttention, req.Status);
+    }
+
+    [Fact]
+    public async Task DownloadWithASonarrWarning_AndNothingImported_IsStillSetAside()
+    {
+        UseConfig(new PluginConfiguration());
+        var unit = ImportingPack(1, 2, 3);
+        unit.Status = RequestStatus.Downloading;
+        var req = Series(unit);
+        req.Status = RequestStatus.Downloading;
+        var sonarr = SonarrWith(Ep(1, 1, 1), Ep(2, 1, 2), Ep(3, 1, 3));
+        QueueWarns(sonarr, "No files found are eligible for import");
+
+        await Tracker(RepoFor(req), sonarr).ProcessRequestAsync(req);
+
+        Assert.Equal(RequestStatus.RequiresAttention, req.Status);
+    }
+
+    [Fact]
+    public async Task EveryDownloadDone_WaitingForJellyfin_IsNotStoppedBySonarrsLeftoverWarning()
+    {
+        // Seen live: the pack's unit was done, the request waited for Jellyfin, and Sonarr's warning about the pack
+        // (episodes already in the library) still matched the request's last torrent
+        UseConfig(new PluginConfiguration());
+        var unit = ImportingPack(3, 4);
+        unit.Status = RequestStatus.Available;
+        var req = Series(unit);
+        req.Status = RequestStatus.Importing;
+        req.TorrentHash = "abc";
+        req.Scope = new RequestScope { EpisodeIds = [3, 4], TargetEpisodes = [
+            new EpisodeTarget { EpisodeId = 3, SeasonNumber = 1, EpisodeNumber = 3 },
+            new EpisodeTarget { EpisodeId = 4, SeasonNumber = 1, EpisodeNumber = 4 }] };
+        var sonarr = SonarrWith(Ep(1, 1, 1, hasFile: true), Ep(3, 1, 3, hasFile: true), Ep(4, 1, 4, hasFile: true));
+        QueueWarns(sonarr, "Episode file already imported at 11/12/2026 05:56:39");
+
+        await Tracker(RepoFor(req), sonarr).ProcessRequestAsync(req);
+
+        Assert.NotEqual(RequestStatus.RequiresAttention, req.Status);
+        Assert.Null(req.AttentionReason);
+    }
+
+    [Fact]
     public async Task FullSeries_SkipsFutureAndToBeAnnouncedEpisodes_AndFollowsTheSeries()
     {
         UseConfig(new PluginConfiguration());
