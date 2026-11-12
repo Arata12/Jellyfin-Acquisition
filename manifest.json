@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "1.5.5.0",
+        "changelog": "Si una serie tiene caracteres como / o : en el nombre (Fate/Zero, Re:Zero), se limpian antes de ponerlo en la carpeta del torrent, para que no se creen subcarpetas ni falle en Windows.\nEl seguimiento vuelve a encontrar los torrents renombrados con el nombre de la serie aunque varios compartan la misma etiqueta.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/Arata12/Jellyfin-Acquisition/releases/download/v1.5.5.0/Jellyfind_1.5.5.0.zip",
+        "checksum": "e07c332549608e62ed2170a58298df90",
+        "timestamp": "2026-11-12T00:42:40.0000000Z"
+      },
+      {
         "version": "1.5.4.0",
         "changelog": "Primera versión con el nombre de la serie en la carpeta del torrent cuando la release usa un nombre genérico de temporada, para que varias series no se mezclen.",
         "targetAbi": "12.2.0.0",
