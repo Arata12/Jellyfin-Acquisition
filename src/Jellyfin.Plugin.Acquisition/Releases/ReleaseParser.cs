@@ -108,8 +108,20 @@ public static class ReleaseParser
     {
         if (!IsGenericSeasonName(releaseTitle)) return releaseTitle;
 
-        var series = (seriesTitle ?? string.Empty).Trim();
+        var series = SafeFolderPart(seriesTitle);
         return series.Length == 0 ? releaseTitle : $"{series} - {releaseTitle}";
+    }
+
+    /// <summary>
+    /// Removes characters that are path separators or invalid in folder names ("Fate/Zero", "Re:Zero"),
+    /// replacing them with a space, so the series name cannot create subfolders or fail on Windows.
+    /// </summary>
+    private static string SafeFolderPart(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+
+        var chars = value.Select(c => c is '/' or '\\' or ':' or '*' or '?' or '"' or '<' or '>' or '|' || char.IsControl(c) ? ' ' : c);
+        return string.Join(' ', new string(chars.ToArray()).Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 
     /// <summary>True when the name is just "Season", "Temporada" or "Temp" with an optional number.</summary>

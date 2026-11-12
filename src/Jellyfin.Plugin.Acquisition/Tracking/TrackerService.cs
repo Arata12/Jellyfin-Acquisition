@@ -1360,7 +1360,11 @@ public class TrackerService : ITrackerService
             var targetName = activeUnit?.TorrentName ?? request.TorrentName ?? activeUnit?.SelectedRelease?.Title ?? request.SelectedRelease?.Title;
             if (!string.IsNullOrEmpty(targetName))
             {
-                var matches = torrents.Where(t => string.Equals(t.Name, targetName, StringComparison.OrdinalIgnoreCase)).ToList();
+                // The torrent may carry the folder name (series name + generic season title) instead of the release title
+                var folderName = ReleaseParser.TorrentFolderName(request.Title, targetName);
+                var matches = torrents.Where(t =>
+                    string.Equals(t.Name, targetName, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(t.Name, folderName, StringComparison.OrdinalIgnoreCase)).ToList();
                 if (matches.Count == 1)
                 {
                     torrent = matches[0];

@@ -89,6 +89,9 @@ public class ReleaseSelectionTests
     [InlineData("temporada 2ª", "Tokyo Revengers", "Tokyo Revengers - temporada 2ª")]
     [InlineData("Tokyo.Revengers.S04.1080p.BluRay.x265", "Tokyo Revengers", "Tokyo.Revengers.S04.1080p.BluRay.x265")]
     [InlineData("Anime", "Tokyo Revengers", "Anime")]
+    [InlineData("Season 1", "Fate/Zero", "Fate Zero - Season 1")]
+    [InlineData("Season 2", "Re:Zero kara Hajimeru Isekai Seikatsu", "Re Zero kara Hajimeru Isekai Seikatsu - Season 2")]
+    [InlineData("Season 1", " / ", "Season 1")]
     public void TorrentFolderName_PrefixesSeriesNameOnlyOnGenericSeasonTitles(string releaseTitle, string seriesTitle, string expected)
     {
         Assert.Equal(expected, ReleaseParser.TorrentFolderName(seriesTitle, releaseTitle));
