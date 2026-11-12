@@ -301,6 +301,12 @@
 
         document.addEventListener('viewshow', () => setTimeout(ensureHeaderButton, 100));
 
+        // A request made from the home rows changes their status: reload them
+        document.addEventListener('acquisition-modal-closed', () => {
+            if (recommendationsState.data) recommendationsState.loadedAt = 0;
+            maintainRecommendations();
+        });
+
         checkPageContext();
     }
 
@@ -309,6 +315,7 @@
     function checkPageContext() {
         keepSectionInPlace();
         maintainRequestsSection();
+        maintainRecommendations();
         ensureHeaderButton();
         // The count only exists for a logged-in user
         if (hasSession()) {
@@ -321,6 +328,152 @@
 
     function isSearchRoute() {
         return typeof window !== 'undefined' && window.location && /^#!?\/search/.test(window.location.hash || '');
+    }
+
+    function isHomeRoute(hash) {
+        const value = hash !== undefined ? hash : (typeof window !== 'undefined' && window.location ? window.location.hash || '' : '');
+        return /^#!?\/home(\.html)?(\?|$)/.test(value);
+    }
+
+    // ---- "Because you watched X" rows on the Jellyfin home page ----
+
+    const RECOMMENDATIONS_TTL_MS = 10 * 60 * 1000;
+    const RECOMMENDATIONS_RETRY_MS = 60 * 1000;
+    const RECOMMENDATIONS_ID = 'acquisition-recommendations';
+    const recommendationsState = { userId: '', data: null, loadedAt: 0, loading: false, retryAfter: 0 };
+
+    function normalizeRecommendations(payload) {
+        const rows = (payload && (payload.rows ?? payload.Rows)) || [];
+        return {
+            rows: rows.map(row => ({
+                title: row.title ?? row.Title ?? '',
+                seedItemId: row.seedItemId ?? row.SeedItemId ?? null,
+                items: (row.items ?? row.Items ?? []).map(normalizeCatalogItem)
+            })).filter(row => row.items.length > 0)
+        };
+    }
+
+    function currentUserId() {
+        const api = typeof window !== 'undefined' ? window.ApiClient : null;
+        return (api && api.getCurrentUserId && api.getCurrentUserId()) || '';
+    }
+
+    function openLocalItem(itemId) {
+        const api = window.ApiClient;
+        const serverId = api && api.serverId ? api.serverId() : '';
+        window.location.hash = `#/details?id=${encodeURIComponent(itemId)}${serverId ? `&serverId=${encodeURIComponent(serverId)}` : ''}`;
+    }
+
+    function createRecommendationCard(item) {
+        // Available titles open Jellyfin's own page; the rest go through the details and request flow
+        return createItemCard(item, { recommendation: true });
+    }
+
+    function renderRecommendations(data) {
+        const wrapper = document.createElement('div');
+        wrapper.id = RECOMMENDATIONS_ID;
+        wrapper.className = themeClassName('verticalSection acquisition-recs');
+
+        data.rows.forEach(row => {
+            const rowEl = document.createElement('div');
+            rowEl.className = 'acquisition-recs-row';
+            rowEl.innerHTML = `<h2 class="sectionTitle sectionTitle-cards padded-left">${escapeHtml(row.title)}</h2>` +
+                '<div class="acquisition-recs-scroller padded-left padded-right"></div>';
+            const scroller = rowEl.querySelector('.acquisition-recs-scroller');
+            row.items.forEach(item => scroller.appendChild(createRecommendationCard(item)));
+            wrapper.appendChild(rowEl);
+        });
+
+        return wrapper;
+    }
+
+    function getHomeSectionsContainer() {
+        const pages = document.querySelectorAll('.homePage:not(.hide)');
+        for (const page of pages) {
+            const container = page.querySelector('.homeSectionsContainer');
+            if (container) return container;
+        }
+        return null;
+    }
+
+    // The rows go after the video "Continue watching" / "Next up" sections (the ones that follow video playback);
+    // without them, first
+    function findRecommendationsAnchor(container) {
+        let anchor = null;
+        Array.from(container.children).forEach(child => {
+            if (child.id !== RECOMMENDATIONS_ID && child.querySelector('.itemsContainer[data-monitor*="videoplayback"]')) anchor = child;
+        });
+        return anchor;
+    }
+
+    function placeRecommendations(container, section) {
+        const anchor = findRecommendationsAnchor(container);
+        const inPlace = section.parentElement === container &&
+            (anchor ? section.previousElementSibling === anchor : container.firstElementChild === section);
+        if (inPlace) return;
+
+        if (anchor) anchor.after(section);
+        else container.insertBefore(section, container.firstChild);
+    }
+
+    function maintainRecommendations() {
+        const existing = document.getElementById(RECOMMENDATIONS_ID);
+        if (!hasSession()) {
+            if (existing) existing.remove();
+            return;
+        }
+        if (!isHomeRoute()) return;
+
+        const container = getHomeSectionsContainer();
+        if (!container) return;
+
+        const userId = currentUserId();
+        if (recommendationsState.userId !== userId) {
+            // Another user signed in without reloading the page
+            recommendationsState.userId = userId;
+            recommendationsState.data = null;
+            recommendationsState.loadedAt = 0;
+            if (existing) existing.remove();
+        }
+
+        const now = Date.now();
+        if (!recommendationsState.loading && now >= recommendationsState.retryAfter &&
+            (!recommendationsState.data || now - recommendationsState.loadedAt > RECOMMENDATIONS_TTL_MS)) {
+            loadRecommendations();
+        }
+
+        const data = recommendationsState.data;
+        let section = document.getElementById(RECOMMENDATIONS_ID);
+        if (!data || data.rows.length === 0) {
+            if (section) section.remove();
+            return;
+        }
+
+        if (!section) section = renderRecommendations(data);
+        placeRecommendations(container, section);
+    }
+
+    async function loadRecommendations() {
+        const userId = recommendationsState.userId;
+        recommendationsState.loading = true;
+        try {
+            const resp = await fetch(`${getApiBase()}/Acquisition/recommendations`, { headers: getAuthHeaders() });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = normalizeRecommendations(await resp.json());
+            if (recommendationsState.userId === userId) {
+                recommendationsState.data = data;
+                recommendationsState.loadedAt = Date.now();
+                // Show the fresh rows in place of the ones rendered from the previous load
+                const old = document.getElementById(RECOMMENDATIONS_ID);
+                if (old) old.remove();
+            }
+        } catch (err) {
+            console.warn('[Acquisition] Could not load recommendations:', err);
+            recommendationsState.retryAfter = Date.now() + RECOMMENDATIONS_RETRY_MS;
+        } finally {
+            recommendationsState.loading = false;
+            maintainRecommendations();
+        }
     }
 
     // Keeps the external block after the local results: React appends late local results behind it and may
@@ -775,8 +928,13 @@
         // An active request badge wins over the "in library" one
         const hasRequest = item.requestStatus !== null && item.requestStatus !== undefined;
         const isLocalSeries = item.isLocal && item.kind === 'Series';
+        const isRecommendation = Boolean(options && options.recommendation);
         let badgeHtml = '';
-        if (hasRequest) {
+        if (isRecommendation && item.isLocal) {
+            badgeHtml = `<span class="acquisition-badge status-Available">${STATUS_LABELS.Available}</span>`;
+        } else if (isRecommendation && !hasRequest) {
+            badgeHtml = '<span class="acquisition-badge status-Suggested">Pedir</span>';
+        } else if (hasRequest) {
             const label = STATUS_LABELS[item.requestStatus] || item.statusText || 'Solicitado';
             badgeHtml = `<span class="acquisition-badge status-${escapeHtml(String(item.requestStatus))}">${escapeHtml(label)}</span>`;
         } else if (isLocalSeries) {
@@ -803,7 +961,10 @@
 
         bindPosterFallback(card);
         card.addEventListener('click', () => {
-            if (isLocalSeries && !hasRequest) {
+            if (isRecommendation) {
+                if (item.isLocal && item.localItemId) openLocalItem(item.localItemId);
+                else openRequestWithDetails(item, card, true);
+            } else if (isLocalSeries && !hasRequest) {
                 // Same flow as the button on the series detail page
                 openLocalSeriesRequest({
                     title: item.title,
@@ -823,7 +984,7 @@
     }
 
     // Cards of "Tus solicitudes" only carry what the request stores: the description, poster and facts come from the catalog
-    async function openRequestWithDetails(item, card) {
+    async function openRequestWithDetails(item, card, preferServerStatus) {
         const providerId = item.kind === 'Series' ? item.providerIds.tvdb : item.providerIds.tmdb;
         let merged = item;
         if (providerId && !card.dataset.loading) {
@@ -832,11 +993,11 @@
                 const resp = await fetch(`${getApiBase()}/Acquisition/catalog/${encodeURIComponent(item.kind)}/${encodeURIComponent(providerId)}`, { headers: getAuthHeaders() });
                 if (resp.ok) {
                     const details = normalizeCatalogItem(await resp.json());
-                    merged = Object.assign({}, details, {
+                    // The server's status is the current one; a card from "Tus solicitudes" carries its own request
+                    merged = Object.assign({}, details, preferServerStatus ? {} : {
                         requestId: item.requestId,
-                        requestStatus: item.requestStatus,
-                        posterUrl: details.posterUrl || item.posterUrl
-                    });
+                        requestStatus: item.requestStatus
+                    }, { posterUrl: details.posterUrl || item.posterUrl });
                 }
             } catch (err) {
                 console.warn('[Acquisition] Could not load title details:', err);
@@ -2073,7 +2234,10 @@
             performExternalSearch,
             getAuthHeaders,
             createItemCard,
-            themeClassName
+            themeClassName,
+            isHomeRoute,
+            normalizeRecommendations,
+            renderRecommendations
         };
     }
 })();

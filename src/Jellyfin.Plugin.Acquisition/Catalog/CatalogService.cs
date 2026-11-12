@@ -442,6 +442,9 @@ public class CatalogService : ICatalogService
         return links;
     }
 
+    public Task<List<CatalogItemDto>> EnrichWithLocalAndRequestStatusAsync(Guid userId, List<CatalogItemDto> items, CancellationToken ct = default) =>
+        EnrichItemsWithLocalAndRequestStatusAsync(userId, items, filterOutLocal: false, ct);
+
     private async Task<List<CatalogItemDto>> EnrichItemsWithLocalAndRequestStatusAsync(Guid userId, List<CatalogItemDto> source, bool filterOutLocal, CancellationToken ct)
     {
         var activeRequests = await _requestRepo.GetAllAsync(ct).ConfigureAwait(false) ?? [];

@@ -158,6 +158,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool EnableSeerrApi { get; set; }
 
     /// <summary>
+    /// Per-user "Because you watched X" rows on the Jellyfin home page, mixing titles already in the library with
+    /// titles that can be requested.
+    /// </summary>
+    public bool EnableRecommendations { get; set; } = true;
+
+    /// <summary>
     /// Optional TMDB key (v3 API key or v4 read access token) for the Seerr API's discover rows and recommendations.
     /// Search, details and requests work without it.
     /// </summary>

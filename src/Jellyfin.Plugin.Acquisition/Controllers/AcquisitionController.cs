@@ -12,6 +12,7 @@ using Jellyfin.Plugin.Acquisition.Catalog;
 using Jellyfin.Plugin.Acquisition.Controllers.Dtos;
 using Jellyfin.Plugin.Acquisition.Adapters.Prowlarr.Models;
 using Jellyfin.Plugin.Acquisition.Models;
+using Jellyfin.Plugin.Acquisition.Recommendations;
 using Jellyfin.Plugin.Acquisition.Registration;
 using Jellyfin.Plugin.Acquisition.Releases;
 using Jellyfin.Plugin.Acquisition.Security;
@@ -33,6 +34,7 @@ public class AcquisitionController : ControllerBase
     private readonly IRadarrClient? _radarrClient;
     private readonly IQBittorrentClient? _qbClient;
     private readonly ILocalMatcherService? _localMatcher;
+    private readonly IRecommendationService? _recommendations;
     private readonly IUserManager _userManager;
     private readonly ILogger<AcquisitionController> _logger;
     private readonly ArrRegistrar _registrar;
@@ -53,8 +55,10 @@ public class AcquisitionController : ControllerBase
         ILogger<AcquisitionController> logger,
         IRadarrClient? radarrClient = null,
         IQBittorrentClient? qbClient = null,
-        ILocalMatcherService? localMatcher = null)
+        ILocalMatcherService? localMatcher = null,
+        IRecommendationService? recommendations = null)
     {
+        _recommendations = recommendations;
         _localMatcher = localMatcher;
         _catalogService = catalogService;
         _requestRepo = requestRepo;
@@ -66,6 +70,30 @@ public class AcquisitionController : ControllerBase
         _radarrClient = radarrClient;
         _qbClient = qbClient;
         _registrar = new ArrRegistrar(sonarrClient, radarrClient, logger);
+    }
+
+    /// <summary>
+    /// "Because you watched X" rows for the Jellyfin home page: library titles the user has not watched mixed with
+    /// titles that can be requested. Empty when the option is off or there is no watch history.
+    /// </summary>
+    [HttpGet("recommendations")]
+    [Authorize]
+    [ProducesResponseType(typeof(RecommendationsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<RecommendationsDto>> GetRecommendations(CancellationToken ct)
+    {
+        var userId = GetValidatedUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        if (_recommendations == null)
+        {
+            return Ok(new RecommendationsDto());
+        }
+
+        return Ok(await _recommendations.GetRecommendationsAsync(userId.Value, ct).ConfigureAwait(false));
     }
 
     private Guid? GetValidatedUserId()

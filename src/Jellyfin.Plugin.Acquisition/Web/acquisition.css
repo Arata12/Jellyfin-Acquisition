@@ -205,6 +205,7 @@
 .acquisition-badge.status-Available { background: #107c10; } /* Available */
 .acquisition-badge.status-RequiresAttention { background: #d83b01; } /* RequiresAttention */
 .acquisition-badge.status-Failed { background: #e81123; } /* Failed */
+.acquisition-badge.status-Suggested { background: rgba(var(--acq-accent), 0.9); color: var(--acq-on-accent); } /* Recommended title that can be requested */
 .acquisition-badge.status-InLibrary { background: #107c10; } /* Series already in the Jellyfin library */
 
 .acq-theme-abyss .acquisition-badge {
@@ -1014,5 +1015,40 @@
 @media (max-width: 600px) {
     .acquisition-cancel-actions > button {
         flex: 1 1 auto;
+    }
+}
+
+/* "Because you watched X" rows on the Jellyfin home page: one horizontally scrolling row per seed title */
+.acquisition-recs {
+    margin-bottom: 1.5em;
+}
+
+.acquisition-recs-row {
+    margin-bottom: 1.2em;
+}
+
+.acquisition-recs-scroller {
+    display: flex;
+    gap: 1em;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-top: 0.6em;
+    padding-bottom: 0.8em;
+    scrollbar-width: thin;
+}
+
+.acquisition-recs-scroller .acquisition-card {
+    flex: 0 0 auto;
+    width: 150px;
+}
+
+@media (max-width: 600px) {
+    .acquisition-recs-scroller {
+        gap: 0.8em;
+    }
+
+    .acquisition-recs-scroller .acquisition-card {
+        width: 120px;
     }
 }

@@ -21,4 +21,10 @@ public interface ICatalogService
     /// Registers a remote image and returns the opaque ID that <see cref="GetImageAsync"/> serves it under.
     /// </summary>
     string? RegisterImage(string? remoteUrl);
+
+    /// <summary>
+    /// Copies the items and marks the ones in the user's library and the ones with an active request
+    /// (the same enrichment search results get). Movies already in the library are kept.
+    /// </summary>
+    Task<List<CatalogItemDto>> EnrichWithLocalAndRequestStatusAsync(Guid userId, List<CatalogItemDto> items, CancellationToken ct = default);
 }

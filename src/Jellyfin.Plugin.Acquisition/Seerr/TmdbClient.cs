@@ -17,6 +17,9 @@ public interface ITmdbClient
 
     /// <summary>Every alternative title TMDB lists for the movie or series; empty without a key or when TMDB cannot be read.</summary>
     Task<List<string>> GetAlternativeTitlesAsync(MediaKind kind, int tmdbId, CancellationToken ct = default);
+
+    /// <summary>TVDB id of a TMDB series: 0 when TMDB lists none, null when TMDB cannot be read.</summary>
+    Task<int?> GetTvdbIdAsync(int tmdbId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -71,6 +74,16 @@ public class TmdbClient : ITmdbClient
             .Where(t => !string.IsNullOrWhiteSpace(t))
             .Select(t => t!)
             .ToList();
+    }
+
+    public async Task<int?> GetTvdbIdAsync(int tmdbId, CancellationToken ct = default)
+    {
+        if (tmdbId <= 0) return null;
+
+        using var doc = await GetJsonAsync($"tv/{tmdbId}/external_ids", new Dictionary<string, string>(), ct).ConfigureAwait(false);
+        if (doc == null) return null;
+
+        return Int(doc.RootElement, "tvdb_id") ?? 0;
     }
 
     private async Task<JsonDocument?> GetJsonAsync(string path, Dictionary<string, string> parameters, CancellationToken ct)
