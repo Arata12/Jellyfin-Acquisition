@@ -153,26 +153,120 @@ public class RecommendationTests
     }
 
     [Fact]
-    public async Task EpisodesAreGroupedIntoTheirSeries_AndSeedsAreLimitedToThree()
+    public async Task EpisodesAreGroupedIntoTheirSeries_AndSeedsAreLimitedToTen()
     {
-        var a = AddSeries("A");
-        var b = AddSeries("B");
-        var c = AddSeries("C");
-        var d = AddSeries("D");
-        var movie = AddMovie("M");
-        _history.AddRange([
-            new Episode { SeriesId = a.Id }, new Episode { SeriesId = a.Id }, movie,
-            new Episode { SeriesId = b.Id }, new Episode { SeriesId = a.Id }, new Episode { SeriesId = c.Id }, new Episode { SeriesId = d.Id }]);
-        foreach (var seed in new BaseItem[] { a, movie, b, c, d })
-        {
-            _similarTo[seed.Id] = [seed is Series ? AddSeries("fill-" + seed.Name) : AddMovie("fill-" + seed.Name)];
-        }
+        var series = Enumerable.Range(0, 12).Select(i => AddSeries("S" + i)).ToList();
+        foreach (var s in series) _similarTo[s.Id] = [AddSeries("fill-" + s.Name)];
+        // S0 has three episodes: they count as one seed, so S10 still makes it into the ten
+        _history.AddRange([new Episode { SeriesId = series[0].Id }, new Episode { SeriesId = series[0].Id }, new Episode { SeriesId = series[0].Id }]);
+        _history.AddRange(series.Skip(1).Select(s => (BaseItem)new Episode { SeriesId = s.Id }));
 
         var result = await Service().GetRecommendationsAsync(_userId);
 
-        // A once (its three episodes count as one seed), then the movie and B; C and D are past the limit
-        Assert.Equal(["Porque viste A", "Porque viste M", "Porque viste B"], result.Rows.Select(r => r.Title));
-        Assert.Equal([a.Id, movie.Id, b.Id], result.Rows.Select(r => r.SeedItemId));
+        var row = Assert.Single(result.Rows);
+        Assert.Equal("Te podría gustar", row.Title);
+        Assert.Null(row.SeedItemId);
+        var titles = row.Items.Select(i => i.Title).ToList();
+        Assert.Equal(10, titles.Count);
+        Assert.Contains("fill-S9", titles);
+        Assert.DoesNotContain("fill-S10", titles);
+        Assert.DoesNotContain("fill-S11", titles);
+    }
+
+    [Fact]
+    public async Task TitleRecommendedByManySeeds_RanksAheadOfOneRecommendedByOne()
+    {
+        var first = AddMovie("First");
+        var second = AddMovie("Second");
+        _history.AddRange([first, second]);
+        var x = AddMovie("X");
+        var y = AddMovie("Y");
+        var z = AddMovie("Z");
+        _similarTo[first.Id] = [x, y];
+        _similarTo[second.Id] = [z, y];
+
+        var result = await Service().GetRecommendationsAsync(_userId);
+
+        // Y: 2/1.1 + 1/1.1 = 2.73, X: 2, Z: 1
+        Assert.Equal(["Y", "X", "Z"], Assert.Single(result.Rows).Items.Select(i => i.Title));
+    }
+
+    [Fact]
+    public async Task RecentSeeds_WeighMore()
+    {
+        var recent = AddMovie("Recent");
+        var old = AddMovie("Old");
+        _history.AddRange([recent, old]);
+        _similarTo[recent.Id] = [AddMovie("FromRecent")];
+        _similarTo[old.Id] = [AddMovie("FromOld")];
+
+        var result = await Service().GetRecommendationsAsync(_userId);
+
+        Assert.Equal(["FromRecent", "FromOld"], Assert.Single(result.Rows).Items.Select(i => i.Title));
+    }
+
+    [Fact]
+    public async Task SameLocalTitle_FromTmdbAndSimilar_IsMergedAndSumsItsScore()
+    {
+        var seed = AddMovie("Seed", "100");
+        _history.Add(seed);
+        var shared = AddMovie("Shared", "1");
+        _localByTmdb["1"] = shared.Id;
+        _similarTo[seed.Id] = [shared];
+        TmdbReturns("movie/100/recommendations", Rec(2, "movie", "Remote"), Rec(1, "movie", "Shared"));
+
+        var result = await Service().GetRecommendationsAsync(_userId);
+
+        // Shared: 1/1.1 (TMDB) + 1 (similar) = 1.91, ahead of Remote at 1
+        var items = Assert.Single(result.Rows).Items;
+        Assert.Equal(["Shared", "Remote"], items.Select(i => i.Title));
+        Assert.True(items[0].IsLocal);
+        Assert.Equal(shared.Id, items[0].LocalItemId);
+    }
+
+    [Fact]
+    public async Task EqualScores_PutAvailableTitlesFirst()
+    {
+        var seed = AddMovie("Seed", "100");
+        _history.Add(seed);
+        _similarTo[seed.Id] = [AddMovie("Local")];
+        TmdbReturns("movie/100/recommendations", Rec(2, "movie", "Remote"));
+
+        var result = await Service().GetRecommendationsAsync(_userId);
+
+        Assert.Equal(["Local", "Remote"], Assert.Single(result.Rows).Items.Select(i => i.Title));
+    }
+
+    [Fact]
+    public async Task RowIsLimitedToThirty_AndTvdbIsOnlyResolvedForWhatIsShown()
+    {
+        var seed = AddSeries("Seed", "100");
+        _history.Add(new Episode { SeriesId = seed.Id });
+        TmdbReturns("tv/100/recommendations", Enumerable.Range(1, 40).Select(i => Rec(i, "tv", "T" + i)).ToArray());
+        _tmdb.Setup(t => t.GetTvdbIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync((int id, CancellationToken _) => id + 1000);
+
+        var result = await Service().GetRecommendationsAsync(_userId);
+
+        var items = Assert.Single(result.Rows).Items;
+        Assert.Equal(30, items.Count);
+        Assert.Equal("T1", items[0].Title);
+        _tmdb.Verify(t => t.GetTvdbIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Exactly(30));
+    }
+
+    [Fact]
+    public async Task FailingSeed_IsIgnored_AndTheOthersStillCount()
+    {
+        var broken = AddMovie("Broken");
+        var fine = AddMovie("Fine");
+        _history.AddRange([broken, fine]);
+        _similarTo[fine.Id] = [AddMovie("Ok")];
+        _similar.Setup(s => s.GetSimilarItemsAsync(It.Is<BaseItem>(b => b.Id == broken.Id), It.IsAny<IReadOnlyList<Guid>>(), It.IsAny<Jellyfin.Database.Implementations.Entities.User>(),
+                It.IsAny<DtoOptions>(), It.IsAny<int?>(), It.IsAny<LibraryOptions>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("boom"));
+
+        var result = await Service().GetRecommendationsAsync(_userId);
+
+        Assert.Equal(["Ok"], Assert.Single(result.Rows).Items.Select(i => i.Title));
     }
 
     [Fact]
@@ -213,7 +307,7 @@ public class RecommendationTests
     }
 
     [Fact]
-    public async Task MixesAvailableAndRequestable_InTmdbOrder_ThenFillsWithLibrary()
+    public async Task MixesAvailableAndRequestable_ByScore()
     {
         var seed = AddMovie("Seed", "100");
         _history.Add(seed);
@@ -230,20 +324,20 @@ public class RecommendationTests
         var result = await Service().GetRecommendationsAsync(_userId);
 
         var items = Assert.Single(result.Rows).Items;
-        Assert.Equal(["Available", "Remote", "Requested", "Filler"], items.Select(i => i.Title));
+        Assert.Equal(["Available", "Filler", "Remote", "Requested"], items.Select(i => i.Title));
         Assert.True(items[0].IsLocal);
-        Assert.False(items[1].IsLocal);
-        Assert.Equal("movie-2", items[1].Id);
-        Assert.Equal(2020, items[1].Year);
-        Assert.StartsWith("/Acquisition/images/", items[1].PosterUrl);
-        Assert.Equal(RequestStatus.Downloading, items[2].RequestStatus);
-        Assert.True(items[3].IsLocal);
+        Assert.True(items[1].IsLocal);
+        Assert.False(items[2].IsLocal);
+        Assert.Equal("movie-2", items[2].Id);
+        Assert.Equal(2020, items[2].Year);
+        Assert.StartsWith("/Acquisition/images/", items[2].PosterUrl);
+        Assert.Equal(RequestStatus.Downloading, items[3].RequestStatus);
         // The server's metadata language is sent to TMDB
         _tmdb.Verify(t => t.GetPageAsync("movie/100/recommendations", 1, "es-ES", "movie", null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task SeedAndDuplicatesAcrossRows_AreLeftOut()
+    public async Task Seeds_AreLeftOut_AndDuplicatesAppearOnce()
     {
         var one = AddMovie("One", "100");
         var two = AddMovie("Two", "200");
@@ -251,14 +345,12 @@ public class RecommendationTests
         var sharedLocal = AddMovie("SharedLocal");
         _similarTo[one.Id] = [one, two, sharedLocal];
         _similarTo[two.Id] = [one, two, sharedLocal];
-        TmdbReturns("movie/100/recommendations", Rec(7, "movie", "Shared"), Rec(100, "movie", "One"));
+        TmdbReturns("movie/100/recommendations", Rec(7, "movie", "Shared"), Rec(100, "movie", "One"), Rec(200, "movie", "Two"));
         TmdbReturns("movie/200/recommendations", Rec(7, "movie", "Shared"), Rec(8, "movie", "Other"));
 
         var result = await Service().GetRecommendationsAsync(_userId);
 
-        Assert.Equal(2, result.Rows.Count);
-        Assert.Equal(["Shared", "SharedLocal"], result.Rows[0].Items.Select(i => i.Title).Order());
-        Assert.Equal(["Other"], result.Rows[1].Items.Select(i => i.Title));
+        Assert.Equal(["Other", "Shared", "SharedLocal"], Assert.Single(result.Rows).Items.Select(i => i.Title).Order());
     }
 
     [Fact]
@@ -397,7 +489,7 @@ public class RecommendationTests
         var output = RunNode("""
             const data = mod.normalizeRecommendations({
                 Rows: [
-                    { Title: 'Porque viste <Frieren>', SeedItemId: 'seed', Items: [
+                    { Title: 'Te podría gustar <Frieren>', SeedItemId: 'seed', Items: [
                         { Id: 'a', Kind: 'Series', Title: 'Local', IsLocal: true, LocalItemId: 'guid-1', PosterUrl: '/Items/guid-1/Images/Primary' },
                         { Id: 'movie-2', Kind: 'Movie', Title: 'Remote', ProviderIds: { Tmdb: '2' } },
                         { Id: 'movie-3', Kind: 'Movie', Title: 'Requested', RequestStatus: 'Downloading', RequestId: 'r1' }
@@ -411,7 +503,7 @@ public class RecommendationTests
             if (section.id !== 'acquisition-recommendations') throw new Error('wrong id ' + section.id);
             if (!section.className.includes('acquisition-recs') || !section.className.includes('acq-theme-')) throw new Error('wrong class ' + section.className);
             const row = section.children[0];
-            if (!row.innerHTML.includes('Porque viste &lt;Frieren&gt;')) throw new Error('title not escaped: ' + row.innerHTML);
+            if (!row.innerHTML.includes('Te podría gustar &lt;Frieren&gt;')) throw new Error('title not escaped: ' + row.innerHTML);
             const cards = row.scroller.children;
             if (cards.length !== 3) throw new Error('expected 3 cards, got ' + cards.length);
             const [local, remote, requested] = cards.map(c => c.innerHTML);

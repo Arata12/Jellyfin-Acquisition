@@ -21,17 +21,19 @@ namespace Jellyfin.Plugin.Acquisition.Recommendations;
 public interface IRecommendationService
 {
     /// <summary>
-    /// "Because you watched X" rows for the user's most recently watched titles. Empty when the option is off or the
-    /// user has no history.
+    /// A single "You might like" row built from the user's most recently watched titles, the most recent weighing
+    /// more. Empty when the option is off or the user has no history.
     /// </summary>
     Task<RecommendationsDto> GetRecommendationsAsync(Guid userId, CancellationToken ct = default);
 }
 
 public class RecommendationService : IRecommendationService
 {
-    internal const int MaxRows = 3;
-    internal const int MaxItemsPerRow = 20;
-    internal const int HistoryLimit = 50;
+    internal const int MaxSeeds = 10;
+    internal const int MaxItems = 30;
+    internal const int HistoryLimit = 100;
+    internal const string RowTitle = "Te podría gustar";
+    private const double PositionDecay = 0.1;
 
     private static readonly TimeSpan TmdbCacheLifetime = TimeSpan.FromHours(12);
     private const int MaxCachedLists = 500;
@@ -80,39 +82,113 @@ public class RecommendationService : IRecommendationService
 
         var canRequest = SecurityHelper.CanAcquire(userId, _userManager, config);
         var language = GetMetadataLanguage();
-        var seen = new HashSet<string>();
 
         var seeds = GetSeeds(user);
+        if (seeds.Count == 0) return result;
+
+        // Watched titles are never recommended; by TMDB id too, in case the library match of a recommendation misses them
+        var excluded = new HashSet<string>();
         foreach (var seed in seeds)
         {
-            seen.Add(LocalKey(seed.Id));
-            // Also by TMDB id, in case the library match of a recommendation misses the watched title itself
-            seen.Add($"{(seed is Series ? MediaKind.Series : MediaKind.Movie)}:{seed.GetProviderId(MetadataProvider.Tmdb)}");
+            excluded.Add(LocalKey(seed.Id));
+            excluded.Add($"{(seed is Series ? MediaKind.Series : MediaKind.Movie)}:{seed.GetProviderId(MetadataProvider.Tmdb)}");
         }
 
-        foreach (var seed in seeds)
+        // Every appearance of a title in a seed's list adds seedWeight * positionWeight to its score
+        var candidates = new Dictionary<string, Candidate>();
+        for (var index = 0; index < seeds.Count; index++)
         {
             ct.ThrowIfCancellationRequested();
+            var seedWeight = seeds.Count - index;
             try
             {
-                var items = await BuildRowAsync(user, userId, seed, canRequest, language, seen, ct).ConfigureAwait(false);
-                if (items.Count > 0)
+                var found = await GetSeedCandidatesAsync(user, userId, seeds[index], language, excluded, ct).ConfigureAwait(false);
+                foreach (var candidate in found)
                 {
-                    result.Rows.Add(new RecommendationRowDto
+                    var weight = seedWeight / (1 + PositionDecay * candidate.Position);
+                    if (candidates.TryGetValue(candidate.Key, out var existing))
                     {
-                        Title = $"Porque viste {seed.Name}",
-                        SeedItemId = seed.Id,
-                        Items = items
-                    });
+                        existing.Score += weight;
+                    }
+                    else
+                    {
+                        candidate.Score = weight;
+                        candidates[candidate.Key] = candidate;
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "Could not build the recommendations row for {Seed}", seed.Name);
+                _logger.LogWarning(ex, "Could not get recommendations for {Seed}", seeds[index].Name);
             }
         }
 
+        // Best score first; available titles first among equals. The costly checks run only on what gets to the row.
+        var items = new List<CatalogItemDto>();
+        var seriesSlots = new List<int>();
+        foreach (var candidate in candidates.Values.OrderByDescending(c => c.Score).ThenByDescending(c => c.Item.IsLocal))
+        {
+            if (items.Count >= MaxItems) break;
+            ct.ThrowIfCancellationRequested();
+
+            var item = candidate.Item;
+            if (item.IsLocal)
+            {
+                var local = candidate.Local ?? (item.LocalItemId.HasValue ? _libraryManager.GetItemById(item.LocalItemId.Value) : null);
+                if (local == null || HasStarted(user, local)) continue;
+
+                item.PosterUrl = LocalPosterUrl(local) ?? item.PosterUrl;
+                items.Add(item);
+            }
+            else if (canRequest)
+            {
+                if (item.Kind == MediaKind.Series)
+                {
+                    // Requests of series are keyed by TVDB; TMDB gives it separately
+                    var tvdb = 0;
+                    try
+                    {
+                        tvdb = int.TryParse(item.ProviderIds.Tmdb, out var tmdbId) ? await GetTvdbIdAsync(tmdbId, ct).ConfigureAwait(false) : 0;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _logger.LogWarning(ex, "Could not resolve the TVDB id of {Title}", item.Title);
+                    }
+
+                    if (tvdb <= 0) continue;
+
+                    item.ProviderIds.Tvdb = tvdb.ToString(CultureInfo.InvariantCulture);
+                    item.Id = $"series-{tvdb}";
+                    seriesSlots.Add(items.Count);
+                }
+
+                items.Add(item);
+            }
+        }
+
+        if (seriesSlots.Count > 0)
+        {
+            // The request status of a series is matched by its TVDB id, known only now
+            var withStatus = await _catalog.EnrichWithLocalAndRequestStatusAsync(userId, seriesSlots.Select(i => items[i]).ToList(), ct).ConfigureAwait(false);
+            for (var i = 0; i < seriesSlots.Count && i < withStatus.Count; i++) items[seriesSlots[i]] = withStatus[i];
+        }
+
+        if (items.Count > 0)
+        {
+            result.Rows.Add(new RecommendationRowDto { Title = RowTitle, Items = items });
+        }
+
         return result;
+    }
+
+    private sealed class Candidate
+    {
+        public required string Key { get; init; }
+        public required CatalogItemDto Item { get; init; }
+        public BaseItem? Local { get; init; }
+        /// <summary>Place in the seed's own list (TMDB or library), from 0.</summary>
+        public int Position { get; init; }
+        public double Score { get; set; }
     }
 
     /// <summary>The most recently watched movies and series (episodes count for their series), newest first.</summary>
@@ -140,86 +216,62 @@ public class RecommendationService : IRecommendationService
             if (seed is not (Movie or Series) || !seenIds.Add(seed.Id)) continue;
 
             seeds.Add(seed);
-            if (seeds.Count >= MaxRows) break;
+            if (seeds.Count >= MaxSeeds) break;
         }
 
         return seeds;
     }
 
-    private async Task<List<CatalogItemDto>> BuildRowAsync(
+    /// <summary>
+    /// The candidates of one seed in order: TMDB recommendations first, then similar titles from the library. Titles
+    /// of the user's history and requestable titles for a user who cannot request are already left out.
+    /// </summary>
+    private async Task<List<Candidate>> GetSeedCandidatesAsync(
         Jellyfin.Database.Implementations.Entities.User user,
         Guid userId,
         BaseItem seed,
-        bool canRequest,
         string? language,
-        HashSet<string> seen,
+        HashSet<string> excluded,
         CancellationToken ct)
     {
         var kind = seed is Series ? MediaKind.Series : MediaKind.Movie;
-        var row = new List<CatalogItemDto>();
+        var found = new List<Candidate>();
+        // A title can come from both lists of the seed (each counts), but only once from each
+        var keys = new HashSet<string>();
+        var position = 0;
 
         // a) TMDB recommendations, in TMDB's order
-        var candidates = await GetTmdbCandidatesAsync(kind, seed, language, ct).ConfigureAwait(false);
-        if (candidates.Count > 0)
+        var tmdb = await GetTmdbCandidatesAsync(kind, seed, language, ct).ConfigureAwait(false);
+        if (tmdb.Count > 0)
         {
-            var enriched = await _catalog.EnrichWithLocalAndRequestStatusAsync(userId, candidates, ct).ConfigureAwait(false);
-            var seriesSlots = new List<int>();
+            var enriched = await _catalog.EnrichWithLocalAndRequestStatusAsync(userId, tmdb, ct).ConfigureAwait(false);
             foreach (var item in enriched)
             {
-                if (row.Count >= MaxItemsPerRow) break;
+                var key = item.IsLocal && item.LocalItemId.HasValue ? LocalKey(item.LocalItemId.Value) : RemoteKey(item);
+                if (item.IsLocal && !item.LocalItemId.HasValue) continue;
+                if (excluded.Contains(key) || !keys.Add(key)) continue;
 
-                if (item.IsLocal)
-                {
-                    var local = item.LocalItemId.HasValue ? _libraryManager.GetItemById(item.LocalItemId.Value) : null;
-                    if (local != null && !HasStarted(user, local) && seen.Add(LocalKey(local.Id)))
-                    {
-                        item.PosterUrl = LocalPosterUrl(local) ?? item.PosterUrl;
-                        row.Add(item);
-                    }
-                }
-                else if (canRequest && !seen.Contains(RemoteKey(item)))
-                {
-                    if (item.Kind == MediaKind.Series)
-                    {
-                        // Requests of series are keyed by TVDB; TMDB gives it separately
-                        var tvdb = int.TryParse(item.ProviderIds.Tmdb, out var tmdbId) ? await GetTvdbIdAsync(tmdbId, ct).ConfigureAwait(false) : 0;
-                        if (tvdb <= 0) continue;
-
-                        item.ProviderIds.Tvdb = tvdb.ToString(CultureInfo.InvariantCulture);
-                        item.Id = $"series-{tvdb}";
-                        seriesSlots.Add(row.Count);
-                    }
-
-                    seen.Add(RemoteKey(item));
-                    row.Add(item);
-                }
-            }
-
-            if (seriesSlots.Count > 0)
-            {
-                // The request status of a series is matched by its TVDB id, known only now
-                var withStatus = await _catalog.EnrichWithLocalAndRequestStatusAsync(userId, seriesSlots.Select(i => row[i]).ToList(), ct).ConfigureAwait(false);
-                for (var i = 0; i < seriesSlots.Count && i < withStatus.Count; i++) row[seriesSlots[i]] = withStatus[i];
+                found.Add(new Candidate { Key = key, Item = item, Position = position++ });
             }
         }
 
-        // b) Fill with similar titles from the library
-        if (row.Count < MaxItemsPerRow)
+        // b) Similar titles from the library: the same source Jellyfin uses for "More like this"
+        keys.Clear();
+        position = 0;
+        var similar = await _similarItems.GetSimilarItemsAsync(
+            seed, [], user, new DtoOptions(false), MaxItems * 2, _libraryManager.GetLibraryOptions(seed), ct).ConfigureAwait(false);
+
+        foreach (var local in similar)
         {
-            // The same source Jellyfin uses for "More like this"; only titles of the seed's own type are of use here
-            var similar = await _similarItems.GetSimilarItemsAsync(
-                seed, [], user, new DtoOptions(false), MaxItemsPerRow * 3, _libraryManager.GetLibraryOptions(seed), ct).ConfigureAwait(false);
+            if (kind == MediaKind.Series ? local is not Series : local is not Movie) continue;
 
-            foreach (var local in similar)
-            {
-                if (row.Count >= MaxItemsPerRow) break;
-                if (local.Id == seed.Id || (kind == MediaKind.Series ? local is not Series : local is not Movie) || HasStarted(user, local) || !seen.Add(LocalKey(local.Id))) continue;
+            var key = LocalKey(local.Id);
+            if (excluded.Contains(key) || !keys.Add(key)) continue;
 
-                row.Add(MapLocal(local, kind));
-            }
+            found.Add(new Candidate { Key = key, Item = MapLocal(local, kind), Local = local, Position = position++ });
         }
 
-        return row;
+        return found;
     }
 
     private async Task<List<CatalogItemDto>> GetTmdbCandidatesAsync(MediaKind kind, BaseItem seed, string? language, CancellationToken ct)

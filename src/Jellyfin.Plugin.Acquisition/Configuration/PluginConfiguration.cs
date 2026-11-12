@@ -158,8 +158,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool EnableSeerrApi { get; set; }
 
     /// <summary>
-    /// Per-user "Because you watched X" rows on the Jellyfin home page, mixing titles already in the library with
-    /// titles that can be requested.
+    /// Per-user "Te podría gustar" row on the Jellyfin home page, built from the recent watch history, mixing titles
+    /// already in the library with titles that can be requested.
     /// </summary>
     public bool EnableRecommendations { get; set; } = true;
 
