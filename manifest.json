@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "1.5.7.0",
+        "changelog": "Recomendaciones: una sola fila «Te podría gustar» en la página de inicio que combina tus últimos títulos vistos, en lugar de una fila «Porque viste…» por título.\nPacks de temporada: si un episodio no tiene ninguna release suelta válida, se busca la temporada y se usa su pack como último recurso; los demás episodios ya emitidos de esa temporada entran en esa misma descarga y los que faltan por emitir siguen aparte. Si el pack no traía algún episodio, los importados se dan por hechos y los que faltan se buscan por separado. El aviso que deja Sonarr en un pack con episodios que ya tenías ya no detiene la solicitud.\nEpisodios sin emitir: un episodio de una temporada pedida no se busca hasta que se emite (se relee su fecha en Sonarr; sin fecha, espera).\nEspeciales: la temporada 0 cuenta como otra temporada, así que un especial (S00, «Specials») ya no se descarga al pedir otra temporada.\nBúsquedas: una búsqueda a Prowlarr a la vez y al menos 10 segundos entre cada una, para no saturar los indexadores.\nNombres en español: se reconocen «Temporada N», «Temporada 3 Capítulo 2» y «Cap.302».",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/Arata12/Jellyfin-Acquisition/releases/download/v1.5.7.0/Jellyfind_1.5.7.0.zip",
+        "checksum": "9d0b47b6a2cb15e90ac989441457260a",
+        "timestamp": "2026-11-12T05:16:52.0000000Z"
+      },
+      {
         "version": "1.5.6.0",
         "changelog": "Recomendaciones en la página de inicio: filas «Porque viste…» para cada usuario con títulos de la biblioteca que aún no ha visto y, si puede pedir, títulos que no están, con su botón para pedirlos. Las de fuera de la biblioteca salen de TMDB (necesitan la clave de TMDB); se pueden desactivar en la configuración.",
         "targetAbi": "12.2.0.0",
