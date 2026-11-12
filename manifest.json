@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "1.5.6.0",
+        "changelog": "Recomendaciones en la página de inicio: filas «Porque viste…» para cada usuario con títulos de la biblioteca que aún no ha visto y, si puede pedir, títulos que no están, con su botón para pedirlos. Las de fuera de la biblioteca salen de TMDB (necesitan la clave de TMDB); se pueden desactivar en la configuración.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/Arata12/Jellyfin-Acquisition/releases/download/v1.5.6.0/Jellyfind_1.5.6.0.zip",
+        "checksum": "179b058914a139171bc7638092a9eb5e",
+        "timestamp": "2026-11-12T02:21:39.0000000Z"
+      },
+      {
         "version": "1.5.5.0",
         "changelog": "Si una serie tiene caracteres como / o : en el nombre (Fate/Zero, Re:Zero), se limpian antes de ponerlo en la carpeta del torrent, para que no se creen subcarpetas ni falle en Windows.\nEl seguimiento vuelve a encontrar los torrents renombrados con el nombre de la serie aunque varios compartan la misma etiqueta.",
         "targetAbi": "12.2.0.0",
