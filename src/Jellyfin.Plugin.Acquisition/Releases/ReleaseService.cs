@@ -131,17 +131,46 @@ public class ReleaseService : IReleaseService
             }
         }
 
+        // No valid release of a single episode: indexers rarely return season packs to an episode search, so the
+        // season is searched as well and a pack of it is the last resort (only with a season number to search)
+        if (!candidates.Any(c => c.IsEligible) && request.Kind == MediaKind.Series && pQuery.Episode.HasValue && pQuery.Season.HasValue)
+        {
+            var seasonQuery = CloneQuery(pQuery, pQuery.Query);
+            seasonQuery.Episode = null;
+            seasonQuery.AbsoluteEpisode = null;
+            var seasonById = await SearchByIdAsync(seasonQuery, ct).ConfigureAwait(false);
+            var added = AddCandidates(seasonById, fromIdSearch: true, request, seen);
+            if (!pQuery.IsAnime)
+            {
+                try
+                {
+                    var seasonByTitle = await _prowlarrClient.SearchAsync(seasonQuery, ct).ConfigureAwait(false) ?? [];
+                    added.AddRange(AddCandidates(seasonByTitle, fromIdSearch: false, request, seen));
+                }
+                catch (ProwlarrUnavailableException ex)
+                {
+                    _logger.LogDebug(ex, "Season search for {Title} failed", pQuery.Query);
+                }
+            }
+
+            // Only the packs matter here: the season's episodes were already searched one by one
+            await EvaluateAllAsync(added, request, unit, aliases, config, ct).ConfigureAwait(false);
+            candidates.AddRange(added.Where(c => c.IsSeasonPack));
+        }
+
         // Deterministic ordering (user decision): eligible first; a whole-season pack when a whole season was asked for;
         // a torrent with seeders before one without (it would never download); then the most quality points, then the
         // most seeders among equal points, then title. A release of another title never sits above one of the requested
         // title, whatever its seeders.
-        var wantsWholeSeason = request.Kind == MediaKind.Series && request.Scope.SeasonNumbers.Count > 0 && request.Scope.EpisodeNumbers.Count == 0;
+        var wantsWholeSeason = unit != null
+            ? unit.IsFullSeasonPack
+            : request.Kind == MediaKind.Series && request.Scope.SeasonNumbers.Count > 0 && request.Scope.EpisodeNumbers.Count == 0;
         return candidates
             .OrderByDescending(c => c.IsEligible)
+            // A single episode was asked for: any valid release of the episode itself before a pack of its season
+            .ThenByDescending(c => !(pQuery.Episode.HasValue && c.IsSeasonPack))
             .ThenByDescending(c => c.IdentityVerified && !c.IdentityRejected)
             .ThenByDescending(c => wantsWholeSeason && c.IsSeasonPack)
-            // A single episode was asked for: the episode itself before a whole season found by ID
-            .ThenByDescending(c => !(pQuery.Episode.HasValue && c.IsSeasonPack))
             .ThenByDescending(c => c.Seeders > 0)
             .ThenByDescending(c => c.Score)
             .ThenByDescending(c => c.Seeders)
@@ -659,15 +688,11 @@ public class ReleaseService : IReleaseService
                         reasons.Add("Es un episodio suelto y se buscaba la temporada completa.");
                     }
                 }
-                else if (targetEpisode.HasValue)
+                else if (targetEpisode.HasValue && !candidate.IsSeasonPack)
                 {
-                    // The search by ID already asked the indexer for this episode (user decision: the ID decides), so
-                    // a release it returned is kept when its name says no episode or is the whole season
-                    if (candidate.IsSeasonPack)
-                    {
-                        if (!candidate.FromIdSearch) reasons.Add("Es un pack de temporada y se buscaba un solo episodio.");
-                    }
-                    else if (candidate.EpisodeNumber > 0 && candidate.EpisodeNumber != targetEpisode.Value)
+                    // A pack of the episode's season (checked above) contains it: valid, but only as a last resort, since
+                    // the episode is ordered first and the tracker groups the season's other aired episodes into it
+                    if (candidate.EpisodeNumber > 0 && candidate.EpisodeNumber != targetEpisode.Value)
                     {
                         reasons.Add($"Es otro episodio (E{candidate.EpisodeNumber:D2}; se buscaba E{targetEpisode.Value:D2}).");
                     }
@@ -684,7 +709,7 @@ public class ReleaseService : IReleaseService
                             reasons.Add($"Es otro episodio (número absoluto {candidate.AbsoluteEpisodeNumber}; se buscaba el {targetAbsolute.Value}).");
                         }
                     }
-                    else if (candidate.EpisodeNumber <= 0 && !candidate.IsSeasonPack && !candidate.FromIdSearch)
+                    else if (candidate.EpisodeNumber <= 0)
                     {
                         reasons.Add("No indica qué episodio es y se buscaba uno concreto.");
                     }

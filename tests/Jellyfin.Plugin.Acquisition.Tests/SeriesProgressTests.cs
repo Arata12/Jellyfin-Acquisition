@@ -288,6 +288,153 @@ public class SeriesProgressTests
         releases.Verify(r => r.SearchAndEvaluateReleasesForUnitAsync(It.IsAny<AcquisitionRequest>(), It.IsAny<DownloadUnit>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce());
     }
 
+    // ---- Only a season pack was found for an episode ----
+
+    private static ReleaseCandidate Pack(string title, int season = 1)
+    {
+        var pack = Candidate(title);
+        pack.IsSeasonPack = true;
+        pack.SeasonNumber = season;
+        return pack;
+    }
+
+    private static (Mock<IProwlarrClient> Prowlarr, Mock<IQBittorrentClient> Qb) DownloadThatStopsAtTheFetch()
+    {
+        var prowlarr = new Mock<IProwlarrClient>();
+        prowlarr.Setup(p => p.FetchTorrentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TorrentDownloadResult { ErrorMessage = "HTTP 500" });
+        var qb = new Mock<IQBittorrentClient>();
+        qb.Setup(q => q.GetTorrentsInfoAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        return (prowlarr, qb);
+    }
+
+    [Fact]
+    public async Task PackChosenForAnEpisode_CoversTheSeasonsAiredEpisodes_TheUnairedOneStaysApart()
+    {
+        // The season was taken as airing when requested (one download per episode), but it has finished since
+        UseConfig(new PluginConfiguration());
+        var now = DateTime.UtcNow;
+        var req = Series(Episode(1, RequestStatus.Searching), Episode(2), Episode(3, airDate: now.AddDays(3)), Episode(4, airDate: now.AddDays(7)));
+        req.Scope = new RequestScope { SeasonNumbers = [1] };
+        var sonarr = SonarrWith(Ep(1, 1, 1), Ep(2, 1, 2), Ep(3, 1, 3, airedDaysAgo: 1), Ep(4, 1, 4, airedDaysAgo: -7));
+        var (prowlarr, qb) = DownloadThatStopsAtTheFetch();
+
+        await Tracker(RepoFor(req), sonarr, ReleasesReturning(_ => [Pack("Frieren S01 1080p")]), prowlarr, qb).ProcessRequestAsync(req);
+
+        Assert.Equal(2, req.Units.Count);
+        var pack = req.Units[0];
+        Assert.True(pack.IsFullSeasonPack);
+        Assert.Equal([1, 2, 3], pack.EpisodeNumbers);
+        Assert.Equal([1, 2, 3], pack.EpisodeIds);
+        Assert.Equal("Frieren S01 1080p", pack.SelectedRelease?.Title);
+        Assert.Equal("u4", req.Units[1].Id);
+        Assert.Equal(RequestStatus.Pending, req.Units[1].Status);
+        Assert.Contains(req.History, h => h.Message.Contains("Solo se encontró el pack de la temporada 1", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task EpisodeChosenOnItsOwn_TakesThePack_WithoutBecomingASeasonDownload()
+    {
+        UseConfig(new PluginConfiguration());
+        var req = Series(Episode(5, RequestStatus.Searching));
+        req.Scope = new RequestScope { EpisodeIds = [5] };
+        var (prowlarr, qb) = DownloadThatStopsAtTheFetch();
+
+        await Tracker(RepoFor(req), SonarrWith(Ep(5, 1, 5)), ReleasesReturning(_ => [Pack("Frieren S01 1080p")]), prowlarr, qb).ProcessRequestAsync(req);
+
+        var unit = Assert.Single(req.Units);
+        Assert.False(unit.IsFullSeasonPack);
+        Assert.Equal([5], unit.EpisodeNumbers);
+        Assert.Equal("Frieren S01 1080p", unit.SelectedRelease?.Title);
+    }
+
+    private static DownloadUnit ImportingPack(params int[] episodes) => new()
+    {
+        Id = "pack",
+        SeasonNumber = 1,
+        EpisodeNumbers = [.. episodes],
+        EpisodeIds = [.. episodes],
+        IsFullSeasonPack = true,
+        Status = RequestStatus.Importing,
+        TorrentHash = "abc",
+        SelectedRelease = Pack("Frieren S01 1080p"),
+        ImportWaitStartedAt = DateTimeOffset.UtcNow.AddMinutes(-2)
+    };
+
+    private static void QueueWarns(Mock<ISonarrClient> sonarr, string message) =>
+        sonarr.Setup(s => s.GetQueueAsync(It.IsAny<CancellationToken>())).ReturnsAsync([
+            new SonarrQueueItem
+            {
+                DownloadId = "ABC",
+                SeriesId = 1,
+                TrackedDownloadStatus = "warning",
+                TrackedDownloadState = "importPending",
+                StatusMessages = [new SonarrStatusMessage { Title = "Frieren S01 1080p", Messages = [message] }]
+            }
+        ]);
+
+    [Fact]
+    public async Task PackWithoutSomeEpisodes_KeepsTheImportedOnes_AndSearchesTheMissingOneApart()
+    {
+        UseConfig(new PluginConfiguration());
+        var unit = ImportingPack(1, 2, 3);
+        var req = Series(unit);
+        req.Status = RequestStatus.Importing;
+        var sonarr = SonarrWith(Ep(1, 1, 1, hasFile: true), Ep(2, 1, 2, hasFile: true), Ep(3, 1, 3));
+        QueueWarns(sonarr, "One or more episodes expected in this release were not imported or missing from the release");
+        var releases = ReleasesReturning(_ => []);
+
+        await Tracker(RepoFor(req), sonarr, releases).ProcessRequestAsync(req);
+
+        Assert.Equal(RequestStatus.Available, unit.Status);
+        Assert.Equal([1, 2], unit.EpisodeIds);
+        Assert.Equal([1, 2], unit.EpisodeNumbers);
+        var missing = req.Units[1];
+        Assert.Equal([3], missing.EpisodeIds);
+        Assert.Equal([3], missing.EpisodeNumbers);
+        Assert.False(missing.IsFullSeasonPack);
+        // The same pack is not taken again for it, and it is searched right away
+        Assert.Single(missing.UnavailableReleases);
+        Assert.NotEqual(RequestStatus.RequiresAttention, req.Status);
+        releases.Verify(r => r.SearchAndEvaluateReleasesForUnitAsync(It.IsAny<AcquisitionRequest>(), missing, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains(req.History, h => h.Message.Contains("no traía S01E03", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PackStillImporting_WithoutASonarrProblem_KeepsWaiting()
+    {
+        UseConfig(new PluginConfiguration());
+        var unit = ImportingPack(1, 2, 3);
+        var req = Series(unit);
+        req.Status = RequestStatus.Importing;
+        var sonarr = SonarrWith(Ep(1, 1, 1, hasFile: true), Ep(2, 1, 2), Ep(3, 1, 3));
+        sonarr.Setup(s => s.GetQueueAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
+
+        await Tracker(RepoFor(req), sonarr).ProcessRequestAsync(req);
+
+        Assert.Single(req.Units);
+        Assert.Equal([1, 2, 3], unit.EpisodeIds);
+        Assert.Equal(RequestStatus.Importing, unit.Status);
+    }
+
+    [Fact]
+    public async Task PackWhoseEpisodesAreAllImported_IsDone_EvenIfSonarrWarnsAboutTheRestOfTheTorrent()
+    {
+        // The pack also had episodes already in the library, which Sonarr does not import again
+        UseConfig(new PluginConfiguration());
+        var unit = ImportingPack(4, 5);
+        var req = Series(unit);
+        req.Status = RequestStatus.Importing;
+        var sonarr = SonarrWith(Ep(1, 1, 1, hasFile: true), Ep(4, 1, 4, hasFile: true), Ep(5, 1, 5, hasFile: true));
+        QueueWarns(sonarr, "Not an upgrade for existing episode file(s)");
+
+        await Tracker(RepoFor(req), sonarr).ProcessRequestAsync(req);
+
+        Assert.Equal(RequestStatus.Available, unit.Status);
+        Assert.NotEqual(RequestStatus.RequiresAttention, req.Status);
+        Assert.Null(req.AttentionReason);
+    }
+
     [Fact]
     public async Task FullSeries_SkipsFutureAndToBeAnnouncedEpisodes_AndFollowsTheSeries()
     {

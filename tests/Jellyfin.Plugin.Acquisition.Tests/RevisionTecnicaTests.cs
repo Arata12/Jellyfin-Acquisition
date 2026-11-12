@@ -38,7 +38,7 @@ public class RevisionTecnicaTests
     }
 
     [Fact]
-    public async Task N01_SingleEpisodeS02E03_OnlyAcceptsS02E03_RejectsSeasonPackAndOtherEpisodes()
+    public async Task N01_SingleEpisodeS02E03_PicksS02E03_SeasonPackOnlyAsLastResort_RejectsOtherEpisodes()
     {
         var mockProwlarr = new Mock<IProwlarrClient>();
         var mockSonarr = new Mock<ISonarrClient>();
@@ -98,10 +98,10 @@ public class RevisionTecnicaTests
         Assert.False(s02e01.IsEligible);
         Assert.Contains(s02e01.RejectionReasons, r => r.Contains("Es otro episodio"));
 
-        // S02 Season Pack must be rejected for Coverage mismatch (user requested standalone episode)
+        // The S02 pack contains the episode: valid, but ordered after the episode itself (last resort)
         var s02Pack = results.First(r => r.Title.Contains("S02.Complete"));
-        Assert.False(s02Pack.IsEligible);
-        Assert.Contains(s02Pack.RejectionReasons, r => r.Contains("se buscaba un solo episodio"));
+        Assert.True(s02Pack.IsEligible);
+        Assert.True(results.IndexOf(s02Pack) > results.FindIndex(r => r.Title.Contains("S02E03")));
 
         // S02E03 must be eligible and top candidate
         var s02e03 = results.First(r => r.Title.Contains("S02E03"));

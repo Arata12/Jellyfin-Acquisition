@@ -237,7 +237,7 @@ public class ReleaseIdentityTests
     }
 
     [Fact]
-    public async Task SearchAndEvaluate_IdSearch_KeepsSpanishSeasonNamedReleasesForAnEpisode()
+    public async Task SearchAndEvaluate_Episode_SpanishNames_PackOfItsSeasonAsLastResort()
     {
         var mockProwlarr = new Mock<IProwlarrClient>();
         mockProwlarr.Setup(p => p.SearchAsync(It.Is<ProwlarrSearchQuery>(q => !q.ById), It.IsAny<CancellationToken>()))
@@ -257,12 +257,53 @@ public class ReleaseIdentityTests
 
         Assert.True(results.Single(r => r.Title == "Temporada 1").IsEligible);
         Assert.True(results.Single(r => r.Title.Contains("Cap.101", StringComparison.Ordinal)).IsEligible);
-        Assert.True(results.Single(r => r.Title == "Kanojo mo Kanojo 1080p").IsEligible);
+        // A name that says no episode is not taken for one, even from the search by ID
+        Assert.False(results.Single(r => r.Title == "Kanojo mo Kanojo 1080p").IsEligible);
         // Another season is still rejected
         Assert.False(results.Single(r => r.Title.Contains("Cap.201", StringComparison.Ordinal)).IsEligible);
-        // The episodes before the whole season, despite its seeders
-        Assert.DoesNotContain(results.Take(2), r => r.IsSeasonPack);
+        // The episode before the whole season, despite its seeders
+        Assert.Contains("Cap.101", results[0].Title, StringComparison.Ordinal);
         Assert.True(results.Single(r => r.Title == "Temporada 1").IsSeasonPack);
+    }
+
+    [Fact]
+    public async Task SearchAndEvaluate_EpisodeWithoutReleases_TakesThePackOfItsSeasonFromASeasonSearch()
+    {
+        var mockProwlarr = new Mock<IProwlarrClient>();
+        // Nothing for the episode itself
+        mockProwlarr.Setup(p => p.SearchAsync(It.Is<ProwlarrSearchQuery>(q => q.Episode != null), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        mockProwlarr.Setup(p => p.SearchAsync(It.Is<ProwlarrSearchQuery>(q => q.Episode == null && q.Season == 1), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                Release("Girlfriend, Girlfriend S01 1080p WEB-DL", 5),
+                Release("Girlfriend, Girlfriend S02 1080p WEB-DL", 50),
+                Release("Girlfriend, Girlfriend S01E03 1080p WEB-DL", 9)
+            ]);
+
+        var service = new ReleaseService(mockProwlarr.Object, new Mock<ISonarrClient>().Object, new Mock<IRadarrClient>().Object, new Mock<ILogger<ReleaseService>>().Object);
+        var results = await service.SearchAndEvaluateReleasesAsync(GirlfriendGirlfriendE01());
+
+        var best = service.PickBestRelease(results);
+        Assert.Equal("Girlfriend, Girlfriend S01 1080p WEB-DL", best?.Title);
+        Assert.False(results.Single(r => r.Title.Contains("S02", StringComparison.Ordinal)).IsEligible);
+        // Only packs are taken from the season search: its episodes were searched one by one
+        Assert.DoesNotContain(results, r => r.Title.Contains("S01E03", StringComparison.Ordinal));
+        mockProwlarr.Verify(p => p.SearchAsync(It.Is<ProwlarrSearchQuery>(q => q.Episode == null && q.ById), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchAndEvaluate_EpisodeFound_DoesNotSearchTheSeason()
+    {
+        var mockProwlarr = new Mock<IProwlarrClient>();
+        mockProwlarr.Setup(p => p.SearchAsync(It.IsAny<ProwlarrSearchQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Release("Girlfriend, Girlfriend S01E01 1080p WEB-DL", 5)]);
+
+        var service = new ReleaseService(mockProwlarr.Object, new Mock<ISonarrClient>().Object, new Mock<IRadarrClient>().Object, new Mock<ILogger<ReleaseService>>().Object);
+        var results = await service.SearchAndEvaluateReleasesAsync(GirlfriendGirlfriendE01());
+
+        Assert.True(results.Single().IsEligible);
+        mockProwlarr.Verify(p => p.SearchAsync(It.Is<ProwlarrSearchQuery>(q => q.Episode == null), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

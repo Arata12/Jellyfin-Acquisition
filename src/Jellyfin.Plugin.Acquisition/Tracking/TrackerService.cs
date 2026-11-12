@@ -747,6 +747,13 @@ public class TrackerService : ITrackerService
             return;
         }
 
+        // A season pack chosen for one episode (only a pack was found) also covers the season's other aired episodes:
+        // they join this download instead of each one picking the same pack again
+        if (request.Kind == MediaKind.Series && activeUnit != null && !activeUnit.IsFullSeasonPack && selected.IsSeasonPack)
+        {
+            await JoinAiredEpisodesToPackAsync(request, activeUnit, selected, ct).ConfigureAwait(false);
+        }
+
         // 2. Prepare correlation tag and check qBittorrent before adding (R07 & H02)
         request.CorrelationTag = activeUnit?.CorrelationTag ??
             ((activeUnit != null && request.Units.Count > 1)
@@ -1187,6 +1194,48 @@ public class TrackerService : ITrackerService
         }
     }
 
+    /// <summary>
+    /// Moves the pending episodes of the pack's season that have already aired into <paramref name="packUnit"/>. Episodes
+    /// still to air stay as their own downloads and are searched when they air.
+    /// </summary>
+    private async Task JoinAiredEpisodesToPackAsync(AcquisitionRequest request, DownloadUnit packUnit, ReleaseCandidate pack, CancellationToken ct)
+    {
+        var others = request.Units
+            .Where(u => !ReferenceEquals(u, packUnit) && u.Status == RequestStatus.Pending && !u.IsFullSeasonPack &&
+                        u.SelectedRelease == null && u.SeasonNumber == packUnit.SeasonNumber)
+            .ToList();
+        if (others.Count == 0) return;
+
+        // Air dates are read again: the season may have finished airing since the request was made
+        var episodes = request.ArrId.HasValue ? await _sonarrClient.GetEpisodesAsync(request.ArrId.Value, ct).ConfigureAwait(false) : null;
+        if (episodes is { Count: > 0 }) RefreshUnitAirDates(request, episodes);
+
+        var cutoff = DateTime.UtcNow - DownloadUnit.ReleaseGrace;
+        var aired = others.Where(u =>
+        {
+            var episode = episodes?.FirstOrDefault(e => u.EpisodeIds.Contains(e.Id));
+            return episode != null ? HasAired(episode, episodes!, cutoff) : u.AirDateUtc.HasValue && u.AirDateUtc.Value <= cutoff;
+        }).ToList();
+        if (aired.Count == 0) return;
+
+        foreach (var unit in aired)
+        {
+            packUnit.EpisodeNumbers.AddRange(unit.EpisodeNumbers);
+            packUnit.EpisodeIds.AddRange(unit.EpisodeIds);
+            packUnit.AbsoluteEpisodeNumbers.AddRange(unit.AbsoluteEpisodeNumbers);
+            request.Units.Remove(unit);
+        }
+
+        packUnit.EpisodeNumbers.Sort();
+        packUnit.AbsoluteEpisodeNumbers.Sort();
+        // A season download from now on: a new search after a failure looks for a pack and splits into episodes without one
+        packUnit.IsFullSeasonPack = true;
+        request.AddHistory(
+            RequestStatus.Searching,
+            $"Solo se encontró el pack de la temporada {packUnit.SeasonNumber} ({pack.Title}): también cubre los episodios ya emitidos " +
+            $"{string.Join(", ", packUnit.EpisodeNumbers.Select(n => $"E{n:D2}"))}.");
+    }
+
     private static bool HasOtherPendingUnit(AcquisitionRequest request, DownloadUnit unit) =>
         request.Units.Any(u => !ReferenceEquals(u, unit) && u.Status == RequestStatus.Pending);
 
@@ -1262,6 +1311,36 @@ public class TrackerService : ITrackerService
         await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
     }
 
+    /// <summary>This download's entry in Sonarr's queue (by hash or tag); null when absent or Sonarr cannot be read.</summary>
+    private async Task<SonarrQueueItem?> FindSonarrQueueItemAsync(AcquisitionRequest request, DownloadUnit? activeUnit, CancellationToken ct)
+    {
+        var targetHash = activeUnit?.TorrentHash ?? request.TorrentHash;
+        var targetTag = activeUnit?.CorrelationTag ?? request.CorrelationTag;
+        var rootTag = $"acq-{request.Id}";
+
+        List<SonarrQueueItem>? queue;
+        try
+        {
+            queue = await _sonarrClient.GetQueueAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get Sonarr queue for request {Id}", request.Id);
+            return null;
+        }
+
+        return queue?.FirstOrDefault(q =>
+            (!string.IsNullOrEmpty(targetHash) && string.Equals(q.DownloadId, targetHash, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrEmpty(q.Title) && !string.IsNullOrEmpty(targetTag) && q.Title.Contains(targetTag, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrEmpty(q.Title) && q.Title.Contains(rootTag, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>The problem Sonarr reports for a queue entry, or null when it has none.</summary>
+    private static string? SonarrQueueProblem(SonarrQueueItem item) =>
+        item.TrackedDownloadStatus is "warning" or "error" || item.TrackedDownloadState is "importBlocked" or "failed" || item.StatusMessages.Count > 0
+            ? item.StatusMessages.FirstOrDefault()?.Messages?.FirstOrDefault() ?? item.ErrorMessage ?? "importación bloqueada"
+            : null;
+
     private async Task<bool> CheckQueueDiagnosticsAsync(AcquisitionRequest request, DownloadUnit? activeUnit, CancellationToken ct)
     {
         var targetHash = activeUnit?.TorrentHash ?? request.TorrentHash;
@@ -1270,33 +1349,12 @@ public class TrackerService : ITrackerService
 
         if (request.Kind == MediaKind.Series)
         {
-            List<SonarrQueueItem>? queue = null;
-            try
-            {
-                queue = await _sonarrClient.GetQueueAsync(ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to get Sonarr queue for request {Id}", request.Id);
-                return false;
-            }
-
-            if (queue == null) return false;
-
-            var queueItem = queue.FirstOrDefault(q =>
-                (!string.IsNullOrEmpty(targetHash) && string.Equals(q.DownloadId, targetHash, StringComparison.OrdinalIgnoreCase)) ||
-                (!string.IsNullOrEmpty(q.Title) && !string.IsNullOrEmpty(targetTag) && q.Title.Contains(targetTag, StringComparison.OrdinalIgnoreCase)) ||
-                (!string.IsNullOrEmpty(q.Title) && q.Title.Contains(rootTag, StringComparison.OrdinalIgnoreCase)));
-
+            var queueItem = await FindSonarrQueueItemAsync(request, activeUnit, ct).ConfigureAwait(false);
             if (queueItem != null)
             {
-                if (queueItem.TrackedDownloadStatus is "warning" or "error" ||
-                    queueItem.TrackedDownloadState is "importBlocked" or "failed" ||
-                    queueItem.StatusMessages.Count > 0)
+                var msg = SonarrQueueProblem(queueItem);
+                if (msg != null)
                 {
-                    var msg = queueItem.StatusMessages.FirstOrDefault()?.Messages?.FirstOrDefault()
-                        ?? queueItem.ErrorMessage
-                        ?? "importación bloqueada";
                     _logger.LogWarning("Sonarr queue reports a problem for request {Id}: {Message}", request.Id, msg);
                     await ParkUnitAsync(request, activeUnit, "Descarga detenida o con advertencia en Sonarr.", msg,
                         $"Sonarr no puede importar la descarga: «{msg}». Revisa su cola de actividad y usa «Reintentar».", clearSelection: false, ct).ConfigureAwait(false);
@@ -1502,8 +1560,30 @@ public class TrackerService : ITrackerService
     {
         var activeUnit = request.GetActiveUnit();
 
+        // The episodes of this download are already in Sonarr: done, whatever Sonarr says about the rest of the
+        // torrent (e.g. episodes of a pack that were already in the library)
+        var episodesImported = false;
+        if (request.Kind == MediaKind.Series && request.ArrId.HasValue && activeUnit is { EpisodeIds.Count: > 0 })
+        {
+            var current = await _sonarrClient.GetEpisodesAsync(request.ArrId.Value, ct).ConfigureAwait(false);
+            if (current != null)
+            {
+                var withFile = current.Where(e => e.HasFile).Select(e => e.Id).ToHashSet();
+                var missing = activeUnit.EpisodeIds.Where(id => !withFile.Contains(id)).ToList();
+                episodesImported = missing.Count == 0;
+
+                // A pack that did not bring every episode: once Sonarr imported the others and reports a problem with
+                // the download (or the import wait ran out), the missing episodes are searched on their own
+                if (missing.Count > 0 && missing.Count < activeUnit.EpisodeIds.Count && await PackImportStalledAsync(request, activeUnit, ct).ConfigureAwait(false))
+                {
+                    SplitOffMissingEpisodes(request, activeUnit, missing, current);
+                    episodesImported = true;
+                }
+            }
+        }
+
         // Reconcile CDH queue diagnostics during importing (H05)
-        if (await CheckQueueDiagnosticsAsync(request, activeUnit, ct).ConfigureAwait(false))
+        if (!episodesImported && await CheckQueueDiagnosticsAsync(request, activeUnit, ct).ConfigureAwait(false))
         {
             return;
         }
@@ -1641,6 +1721,49 @@ public class TrackerService : ITrackerService
         }
 
         await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+    }
+
+    private async Task<bool> PackImportStalledAsync(AcquisitionRequest request, DownloadUnit unit, CancellationToken ct)
+    {
+        if (unit.ImportWaitStartedAt.HasValue && DateTimeOffset.UtcNow - unit.ImportWaitStartedAt.Value >= ArrImportTimeout) return true;
+        var queueItem = await FindSonarrQueueItemAsync(request, unit, ct).ConfigureAwait(false);
+        return queueItem != null && SonarrQueueProblem(queueItem) != null;
+    }
+
+    /// <summary>
+    /// Leaves in <paramref name="unit"/> only the episodes its download brought; each missing one becomes its own
+    /// pending download right after it, which does not take the same release again.
+    /// </summary>
+    private static void SplitOffMissingEpisodes(AcquisitionRequest request, DownloadUnit unit, List<int> missingIds, IReadOnlyList<SonarrEpisode> episodes)
+    {
+        var missing = missingIds
+            .Select(id => episodes.FirstOrDefault(e => e.Id == id))
+            .OfType<SonarrEpisode>()
+            .OrderBy(e => e.EpisodeNumber)
+            .ToList();
+        var released = unit.SelectedRelease ?? request.SelectedRelease;
+        var newUnits = missing.Select(e => new DownloadUnit
+        {
+            SeasonNumber = e.SeasonNumber,
+            EpisodeNumbers = [e.EpisodeNumber],
+            EpisodeIds = [e.Id],
+            AbsoluteEpisodeNumbers = e.AbsoluteEpisodeNumber.HasValue ? [e.AbsoluteEpisodeNumber.Value] : [],
+            AirDateUtc = e.AirDateUtc,
+            IsFullSeasonPack = false,
+            Status = RequestStatus.Pending,
+            UnavailableReleases = released != null ? [ReleaseKey(released)] : []
+        }).ToList();
+
+        var missingNumbers = missing.Select(e => e.EpisodeNumber).ToHashSet();
+        var missingAbsolute = missing.Where(e => e.AbsoluteEpisodeNumber.HasValue).Select(e => e.AbsoluteEpisodeNumber!.Value).ToHashSet();
+        unit.EpisodeIds.RemoveAll(missingIds.Contains);
+        unit.EpisodeNumbers.RemoveAll(missingNumbers.Contains);
+        unit.AbsoluteEpisodeNumbers.RemoveAll(missingAbsolute.Contains);
+        request.Units.InsertRange(request.Units.IndexOf(unit) + 1, newUnits);
+        request.AddHistory(
+            RequestStatus.Importing,
+            $"La descarga {released?.Title ?? unit.Describe(request.Kind)} no traía " +
+            $"{string.Join(", ", missing.Select(e => $"S{e.SeasonNumber:D2}E{e.EpisodeNumber:D2}"))}: se buscarán por separado.");
     }
 
     private async Task HandlePendingArrImportAsync(AcquisitionRequest request, DownloadUnit? unit, CancellationToken ct)
