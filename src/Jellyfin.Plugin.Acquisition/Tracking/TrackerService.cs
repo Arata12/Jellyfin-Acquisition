@@ -453,6 +453,14 @@ public class TrackerService : ITrackerService
         }
     }
 
+    /// <summary>
+    /// The unit's episode came with a whole season (or the whole series), not chosen on its own: an episode the user
+    /// picked explicitly is searched even without an air date.
+    /// </summary>
+    private static bool IsFromSeasonSelection(AcquisitionRequest request, DownloadUnit unit) =>
+        (request.Scope.All || request.Scope.SeasonNumbers.Contains(unit.SeasonNumber)) &&
+        !unit.EpisodeIds.Any(id => request.Scope.EpisodeIds.Contains(id));
+
     private static bool IsPresent(SonarrEpisode e, IReadOnlySet<(int Season, int Episode)> local) =>
         e.HasFile || local.Contains((e.SeasonNumber, e.EpisodeNumber));
 
@@ -515,6 +523,33 @@ public class TrackerService : ITrackerService
         {
             await StopWithParkedUnitsAsync(request, ct).ConfigureAwait(false);
             return;
+        }
+
+        // An episode of a requested season is searched only once it has aired: its air date is read again from Sonarr
+        // (it may have been unknown or moved since the request), and without one it waits until Sonarr has it
+        if (request.Kind == MediaKind.Series && request.ArrId.HasValue && activeUnit != null &&
+            activeUnit.Status == RequestStatus.Pending && activeUnit.SelectedRelease == null && !activeUnit.IsFullSeasonPack &&
+            activeUnit.SearchableFromUtc <= DateTime.UtcNow && IsFromSeasonSelection(request, activeUnit))
+        {
+            var episodes = await _sonarrClient.GetEpisodesAsync(request.ArrId.Value, ct).ConfigureAwait(false);
+            if (episodes is { Count: > 0 })
+            {
+                RefreshUnitAirDates(request, episodes);
+                var episode = episodes.FirstOrDefault(e => activeUnit.EpisodeIds.Contains(e.Id))
+                    ?? episodes.FirstOrDefault(e => e.SeasonNumber == activeUnit.SeasonNumber && activeUnit.EpisodeNumbers.Contains(e.EpisodeNumber));
+                if (episode != null && !activeUnit.AirDateUtc.HasValue && !HasAired(episode, episodes, DateTime.UtcNow - DownloadUnit.ReleaseGrace))
+                {
+                    request.NextAttemptUtc = DateTimeOffset.UtcNow + FollowCheckInterval;
+                    var undatedMessage = $"{activeUnit.Describe(request.Kind)} aún no se ha emitido y Sonarr no tiene su fecha: se buscará cuando se emita.";
+                    if (request.History.LastOrDefault()?.Message != undatedMessage)
+                    {
+                        request.AddHistory(RequestStatus.Searching, undatedMessage);
+                    }
+
+                    await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
+                    return;
+                }
+            }
         }
 
         // An episode that has not aired yet waits for its air date plus the release margin (units are in airing order)

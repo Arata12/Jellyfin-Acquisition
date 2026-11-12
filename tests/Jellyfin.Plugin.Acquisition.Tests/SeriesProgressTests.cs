@@ -234,6 +234,61 @@ public class SeriesProgressTests
     }
 
     [Fact]
+    public async Task SeasonEpisodeWithoutAirDate_NotAiredYet_IsNotSearched()
+    {
+        UseConfig(new PluginConfiguration());
+        var releases = ReleasesReturning(_ => [Candidate("x")]);
+        var req = Series(Episode(5));
+        req.Scope = new RequestScope { SeasonNumbers = [1] };
+        var sonarr = new Mock<ISonarrClient>();
+        sonarr.Setup(s => s.GetEpisodesAsync(1, It.IsAny<CancellationToken>())).ReturnsAsync(
+        [
+            new SonarrEpisode { Id = 4, SeasonNumber = 1, EpisodeNumber = 4, AirDateUtc = DateTime.UtcNow.AddDays(-1) },
+            new SonarrEpisode { Id = 5, SeasonNumber = 1, EpisodeNumber = 5 }
+        ]);
+
+        await Tracker(RepoFor(req), sonarr: sonarr, releases: releases).ProcessRequestAsync(req);
+
+        releases.VerifyNoOtherCalls();
+        Assert.True(req.NextAttemptUtc > DateTimeOffset.UtcNow.AddHours(5));
+        Assert.Contains("S01E05 aún no se ha emitido", req.History.Last().Message);
+    }
+
+    [Fact]
+    public async Task SeasonEpisode_DateSetInSonarrAfterTheRequest_WaitsForIt()
+    {
+        UseConfig(new PluginConfiguration());
+        var airs = DateTime.UtcNow.AddDays(3);
+        var releases = ReleasesReturning(_ => [Candidate("x")]);
+        var req = Series(Episode(5));
+        req.Scope = new RequestScope { SeasonNumbers = [1] };
+        var sonarr = new Mock<ISonarrClient>();
+        sonarr.Setup(s => s.GetEpisodesAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new SonarrEpisode { Id = 5, SeasonNumber = 1, EpisodeNumber = 5, AirDateUtc = airs }]);
+
+        await Tracker(RepoFor(req), sonarr: sonarr, releases: releases).ProcessRequestAsync(req);
+
+        releases.VerifyNoOtherCalls();
+        Assert.Contains("Esperando la emisión de S01E05", req.History.Last().Message);
+    }
+
+    [Fact]
+    public async Task EpisodeChosenOnItsOwn_WithoutAirDate_IsSearched()
+    {
+        UseConfig(new PluginConfiguration());
+        var releases = ReleasesReturning(_ => []);
+        var req = Series(Episode(5));
+        req.Scope = new RequestScope { EpisodeIds = [5] };
+        var sonarr = new Mock<ISonarrClient>();
+        sonarr.Setup(s => s.GetEpisodesAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new SonarrEpisode { Id = 5, SeasonNumber = 1, EpisodeNumber = 5 }]);
+
+        await Tracker(RepoFor(req), sonarr: sonarr, releases: releases).ProcessRequestAsync(req);
+
+        releases.Verify(r => r.SearchAndEvaluateReleasesForUnitAsync(It.IsAny<AcquisitionRequest>(), It.IsAny<DownloadUnit>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce());
+    }
+
+    [Fact]
     public async Task FullSeries_SkipsFutureAndToBeAnnouncedEpisodes_AndFollowsTheSeries()
     {
         UseConfig(new PluginConfiguration());
