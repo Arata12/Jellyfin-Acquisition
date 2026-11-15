@@ -2,11 +2,18 @@
 # y añade la versión al manifest.json del repositorio de plugins de Jellyfin.
 #   git tag v1.5.1.0 && git push origin v1.5.1.0
 # La etiqueta debe coincidir con <Version> del .csproj (sin la "v").
+# También se puede lanzar a mano (Actions → Release → Run workflow) sobre main: crea la etiqueta
+# anotada v<Version del .csproj> con el changelog indicado y publica esa versión.
 name: Release
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      changelog:
+        description: 'Cambios de la versión (mensaje de la etiqueta)'
+        required: true
 
 permissions:
   contents: write  # crear la Release, adjuntar el zip y actualizar manifest.json en main
@@ -27,12 +34,33 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # Lanzado a mano: la etiqueta se crea aquí con la versión del .csproj (no vuelve a lanzar el workflow)
+      - name: Crear la etiqueta
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CHANGELOG_INPUT: ${{ inputs.changelog }}
+        run: |
+          VERSION=$(grep -oP '(?<=<Version>)[^<]+' src/Jellyfin.Plugin.Acquisition/Jellyfin.Plugin.Acquisition.csproj)
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::La etiqueta v$VERSION ya existe; sube la versión del .csproj"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "$CHANGELOG_INPUT"
+          git push origin "v$VERSION"
+          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
+
+      - name: Etiqueta subida
+        if: github.event_name != 'workflow_dispatch'
+        run: echo "TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+
       - name: Comprobar que la etiqueta coincide con la versión
         id: version
         run: |
           VERSION=$(grep -oP '(?<=<Version>)[^<]+' src/Jellyfin.Plugin.Acquisition/Jellyfin.Plugin.Acquisition.csproj)
-          if [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
-            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión $VERSION del .csproj"
+          if [ "${TAG#v}" != "$VERSION" ]; then
+            echo "::error::La etiqueta $TAG no coincide con la versión $VERSION del .csproj"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -41,11 +69,11 @@ jobs:
       # si no, el título del commit etiquetado
       - name: Changelog
         run: |
-          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
-          if [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" = tag ]; then
-            TEXT=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          if [ "$(git cat-file -t "refs/tags/$TAG")" = tag ]; then
+            TEXT=$(git tag -l --format='%(contents)' "$TAG")
           else
-            TEXT=$(git log -1 --format=%s "$GITHUB_REF_NAME")
+            TEXT=$(git log -1 --format=%s "$TAG")
           fi
           { echo 'CHANGELOG<<EOF_CHANGELOG'; echo "$TEXT"; echo 'EOF_CHANGELOG'; } >> "$GITHUB_ENV"
 
@@ -74,7 +102,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "Jellyfind_$VERSION.zip" "Jellyfind_$VERSION.zip.sha256" \
+          gh release create "$TAG" "Jellyfind_$VERSION.zip" "Jellyfind_$VERSION.zip.sha256" \
             --title "Jellyfind $VERSION" \
             --generate-notes \
             --notes "Instalación: añade el repositorio https://raw.githubusercontent.com/${{ github.repository }}/main/manifest.json en Jellyfin (Panel de control → Complementos → Repositorios), o crea la carpeta plugins/Jellyfind y descomprime el zip dentro. Compatible con Jellyfin 12.2 a 12.4."
@@ -82,7 +110,7 @@ jobs:
       - name: Actualizar manifest.json
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          ZIP_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/Jellyfind_${{ steps.version.outputs.version }}.zip
+          ZIP_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ env.TAG }}/Jellyfind_${{ steps.version.outputs.version }}.zip
         run: |
           git fetch origin main
           git worktree add ../main origin/main

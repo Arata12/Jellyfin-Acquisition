@@ -1,0 +1,27 @@
+# Borra una rama del repositorio (Actions → Borrar rama → Run workflow). main no se puede borrar.
+name: Borrar rama
+
+on:
+  workflow_dispatch:
+    inputs:
+      rama:
+        description: 'Rama a borrar'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  borrar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Borrar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RAMA: ${{ inputs.rama }}
+        run: |
+          if [ "$RAMA" = main ]; then
+            echo "::error::main no se borra"
+            exit 1
+          fi
+          gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$RAMA"
