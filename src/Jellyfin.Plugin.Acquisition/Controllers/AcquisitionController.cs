@@ -1243,7 +1243,7 @@ public class AcquisitionController : ControllerBase
                 .Select(u => new UnitIssueDto { Label = u.Describe(r.Kind), Reason = u.ErrorMessage })
                 .ToList(),
             Following = r.FollowAiring,
-            WaitingForAir = active is { Status: RequestStatus.Pending, SelectedRelease: null } && active.SearchableFromUtc > DateTime.UtcNow
+            WaitingForAir = active is { Status: RequestStatus.Pending or RequestStatus.Searching, SelectedRelease: null } && active.SearchableFromUtc > DateTime.UtcNow
                 ? $"{active.Describe(r.Kind)} se buscará a partir del {active.SearchableFromUtc:dd/MM HH:mm} UTC"
                 : r.Status is RequestStatus.Searching or RequestStatus.Pending ? r.WaitingNote : null,
             AwaitingSelection = manual &&

@@ -528,7 +528,7 @@ public class TrackerService : ITrackerService
         // An episode of a requested season is searched only once it has aired: its air date is read again from Sonarr
         // (it may have been unknown or moved since the request), and without one it waits until Sonarr has it
         if (request.Kind == MediaKind.Series && request.ArrId.HasValue && activeUnit != null &&
-            activeUnit.Status == RequestStatus.Pending && activeUnit.SelectedRelease == null && !activeUnit.IsFullSeasonPack &&
+            IsWaitingToSearch(activeUnit) && !activeUnit.IsFullSeasonPack &&
             activeUnit.SearchableFromUtc <= DateTime.UtcNow && IsFromSeasonSelection(request, activeUnit))
         {
             var episodes = await _sonarrClient.GetEpisodesAsync(request.ArrId.Value, ct).ConfigureAwait(false);
@@ -553,8 +553,7 @@ public class TrackerService : ITrackerService
         }
 
         // An episode that has not aired yet waits for its air date plus the release margin (units are in airing order)
-        if (activeUnit != null && activeUnit.Status == RequestStatus.Pending && activeUnit.SelectedRelease == null &&
-            activeUnit.SearchableFromUtc > DateTime.UtcNow)
+        if (activeUnit != null && IsWaitingToSearch(activeUnit) && activeUnit.SearchableFromUtc > DateTime.UtcNow)
         {
             var searchableFrom = new DateTimeOffset(DateTime.SpecifyKind(activeUnit.SearchableFromUtc, DateTimeKind.Utc));
             request.NextAttemptUtc = searchableFrom;
@@ -640,6 +639,8 @@ public class TrackerService : ITrackerService
                             SeasonNumber = activeUnit.SeasonNumber,
                             EpisodeNumbers = [epNum],
                             EpisodeIds = epTarget != null ? [epTarget.EpisodeId] : [],
+                            AbsoluteEpisodeNumbers = epTarget?.AbsoluteEpisodeNumber is int abs ? [abs] : [],
+                            AirDateUtc = epTarget?.AirDateUtc,
                             IsFullSeasonPack = false,
                             Status = RequestStatus.Pending
                         };
@@ -1042,7 +1043,7 @@ public class TrackerService : ITrackerService
     /// </summary>
     private void RefreshUnitAirDates(AcquisitionRequest request, IReadOnlyList<SonarrEpisode> allEpisodes)
     {
-        foreach (var unit in request.Units.Where(u => u.Status == RequestStatus.Pending && !u.IsFullSeasonPack))
+        foreach (var unit in request.Units.Where(u => IsWaitingToSearch(u) && !u.IsFullSeasonPack))
         {
             var fresh = allEpisodes.FirstOrDefault(e => unit.EpisodeIds.Contains(e.Id))
                 ?? allEpisodes.FirstOrDefault(e => e.SeasonNumber == unit.SeasonNumber && unit.EpisodeNumbers.Contains(e.EpisodeNumber));
@@ -1236,8 +1237,19 @@ public class TrackerService : ITrackerService
             $"{string.Join(", ", packUnit.EpisodeNumbers.Select(n => $"E{n:D2}"))}.");
     }
 
+    /// <summary>
+    /// Another download can be searched right now: episodes still waiting to air do not count, so an aired episode
+    /// without releases yet keeps being searched instead of being set aside for one that cannot be searched.
+    /// </summary>
     private static bool HasOtherPendingUnit(AcquisitionRequest request, DownloadUnit unit) =>
-        request.Units.Any(u => !ReferenceEquals(u, unit) && u.Status == RequestStatus.Pending);
+        request.Units.Any(u => !ReferenceEquals(u, unit) && u.Status == RequestStatus.Pending && u.SearchableFromUtc <= DateTime.UtcNow);
+
+    /// <summary>
+    /// The unit has not been searched successfully yet: pending, or marked as the next one to search after the previous
+    /// download was imported. Both wait for the episode's air date before searching.
+    /// </summary>
+    private static bool IsWaitingToSearch(DownloadUnit unit) =>
+        unit.Status is RequestStatus.Pending or RequestStatus.Searching && unit.SelectedRelease == null;
 
     private static bool IsReleaseListFresh(AcquisitionRequest request) =>
         request.AvailableReleasesUpdatedAt.HasValue && DateTimeOffset.UtcNow - request.AvailableReleasesUpdatedAt.Value < ManualListRefresh;
@@ -1662,14 +1674,16 @@ public class TrackerService : ITrackerService
         var remainingUnit = request.Units.FirstOrDefault(u => u.Status == RequestStatus.Pending);
         if (remainingUnit != null)
         {
-            remainingUnit.Status = RequestStatus.Searching;
+            // It stays pending: the search checks its air date first and waits if it has not aired yet
             remainingUnit.SelectedRelease = null;
             remainingUnit.TorrentHash = null;
             request.SelectedRelease = null;
             request.TorrentHash = null;
             request.AvailableReleases.Clear();
             request.AvailableReleasesUnitId = null;
-            request.AddHistory(RequestStatus.Searching, $"Unidad anterior importada. Iniciando búsqueda para siguiente unidad: {remainingUnit.Describe(request.Kind)}.");
+            request.AddHistory(RequestStatus.Searching, remainingUnit.SearchableFromUtc > DateTime.UtcNow
+                ? $"Unidad anterior importada. Siguiente unidad: {remainingUnit.Describe(request.Kind)}, pendiente de emisión."
+                : $"Unidad anterior importada. Iniciando búsqueda para siguiente unidad: {remainingUnit.Describe(request.Kind)}.");
             await _requestRepo.SaveOrUpdateAsync(request, ct).ConfigureAwait(false);
             await HandleSearchingAsync(request, ct).ConfigureAwait(false);
             return;
@@ -2158,7 +2172,7 @@ public class TrackerService : ITrackerService
                 var newUnits = BuildSeriesUnits(targets, season => (all || seasons.Contains(season)) && !knownSeasons.Contains(season), episodes, now);
 
                 // After what was already queued, but before episodes still waiting to air, so they do not hold it back
-                var waitingToAir = request.Units.FindIndex(u => u.Status == RequestStatus.Pending && u.SelectedRelease == null && u.SearchableFromUtc > now);
+                var waitingToAir = request.Units.FindIndex(u => IsWaitingToSearch(u) && u.SearchableFromUtc > now);
                 request.Units.InsertRange(waitingToAir >= 0 ? waitingToAir : request.Units.Count, newUnits);
 
                 var inProgress = request.Units.Any(u => u.Status is RequestStatus.Searching or RequestStatus.Downloading or RequestStatus.Importing);

@@ -234,6 +234,38 @@ public class SeriesProgressTests
     }
 
     [Fact]
+    public async Task NextEpisodeMarkedAsSearching_NotAiredYet_IsNotSearched()
+    {
+        // After a download is imported the next one used to be marked as searching, which skipped the air date check
+        UseConfig(new PluginConfiguration());
+        var airs = DateTime.UtcNow.AddDays(1);
+        var releases = ReleasesReturning(_ => [Candidate("x")]);
+        var req = Series(Episode(4, RequestStatus.Available), Episode(5, RequestStatus.Searching, airs), Episode(6, airDate: airs.AddDays(7)));
+
+        await Tracker(RepoFor(req), releases: releases).ProcessRequestAsync(req);
+
+        releases.VerifyNoOtherCalls();
+        Assert.Contains("Esperando la emisión de S01E05", req.History.Last().Message);
+        Assert.Equal(airs + DownloadUnit.ReleaseGrace, req.NextAttemptUtc!.Value.UtcDateTime, TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public async Task AiredEpisodeWithoutReleases_IsNotSetAside_ForEpisodesStillToAir()
+    {
+        UseConfig(new PluginConfiguration());
+        var releases = ReleasesReturning(_ => []);
+        var e5 = Episode(5, airDate: DateTime.UtcNow.AddHours(-2));
+        e5.SearchAttempts = 5;
+        var req = Series(e5, Episode(6, airDate: DateTime.UtcNow.AddDays(7)));
+
+        await Tracker(RepoFor(req), releases: releases).ProcessRequestAsync(req);
+
+        Assert.Equal(RequestStatus.Pending, e5.Status);
+        Assert.Equal("u5", req.GetActiveUnit()!.Id);
+        Assert.Contains("S01E05", req.History.Last().Message);
+    }
+
+    [Fact]
     public async Task SeasonEpisodeWithoutAirDate_NotAiredYet_IsNotSearched()
     {
         UseConfig(new PluginConfiguration());
