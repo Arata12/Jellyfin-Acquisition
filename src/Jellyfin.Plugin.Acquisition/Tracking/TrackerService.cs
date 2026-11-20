@@ -77,6 +77,9 @@ public class TrackerService : ITrackerService
     /// <summary>Reason shown for a download skipped after <see cref="ParkedMaxAge"/>.</summary>
     public const string SkippedAfterMaxAgeReason = "No se encontró en 14 días; puedes volver a pedirlo más tarde.";
 
+    /// <summary>Start of the reason of a download set aside after several searches without valid releases.</summary>
+    private const string NoReleasesReason = "No se encontraron releases válidas";
+
     private readonly SemaphoreSlim _pollLock = new(1, 1);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _requestLocks = new();
 
@@ -663,7 +666,7 @@ public class TrackerService : ITrackerService
                         activeUnit,
                         $"No se encontraron releases válidas tras {MaxEmptySearches} búsquedas.",
                         null,
-                        $"No se encontraron releases válidas para {unitDesc}. Se volverá a intentar automáticamente.",
+                        $"{NoReleasesReason} para {unitDesc}. Se volverá a intentar automáticamente.",
                         clearSelection: true,
                         ct).ConfigureAwait(false);
                     return;
@@ -2301,6 +2304,12 @@ public class TrackerService : ITrackerService
         if (parked.Count == 0) return;
 
         var now = DateTimeOffset.UtcNow;
+
+        // Set aside for lack of releases while the rest only waits for episodes to air: it is searched again now
+        // instead of waiting a day (or for the next air date), and it is not set aside again for unaired episodes
+        var active = request.GetActiveUnit();
+        var onlyWaitingToAir = active != null && IsWaitingToSearch(active) && active.SearchableFromUtc > now.UtcDateTime;
+
         var changed = false;
         var requeued = new List<DownloadUnit>();
         var skipped = new List<DownloadUnit>();
@@ -2322,7 +2331,8 @@ public class TrackerService : ITrackerService
                 unit.ErrorMessage = SkippedAfterMaxAgeReason;
                 skipped.Add(unit);
             }
-            else if (now - unit.ParkedAtUtc.Value >= ParkedAutoRetry)
+            else if (now - unit.ParkedAtUtc.Value >= ParkedAutoRetry ||
+                     (onlyWaitingToAir && unit.ErrorMessage?.StartsWith(NoReleasesReason, StringComparison.Ordinal) == true))
             {
                 RequeueUnit(unit, resetParkedClock: false);
                 requeued.Add(unit);

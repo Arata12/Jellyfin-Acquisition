@@ -312,6 +312,44 @@ public class SeriesProgressTests
     }
 
     [Fact]
+    public async Task EpisodeSetAsideWithoutReleases_IsSearchedAgainAtOnce_WhenTheRestWaitsToAir()
+    {
+        // Set aside by an earlier version: it stayed parked until the next episode aired
+        UseConfig(new PluginConfiguration());
+        var releases = ReleasesReturning(_ => []);
+        var e8 = Episode(8, RequestStatus.RequiresAttention, DateTime.UtcNow.AddDays(-2));
+        e8.ErrorMessage = "No se encontraron releases válidas para S01E08. Se volverá a intentar automáticamente.";
+        e8.ParkedAtUtc = DateTimeOffset.UtcNow - TimeSpan.FromHours(1);
+        var e9Airs = DateTime.UtcNow.AddDays(7);
+        var req = Series(Episode(7, RequestStatus.Available), e8, Episode(9, airDate: e9Airs));
+        req.NextAttemptUtc = e9Airs + DownloadUnit.ReleaseGrace;
+
+        await Tracker(RepoFor(req), releases: releases).ProcessRequestAsync(req);
+
+        releases.Verify(r => r.SearchAndEvaluateReleasesForUnitAsync(It.IsAny<AcquisitionRequest>(), e8, It.IsAny<CancellationToken>()), Times.Once());
+        Assert.Equal(RequestStatus.Pending, e8.Status);
+        Assert.Equal("u8", req.GetActiveUnit()!.Id);
+    }
+
+    [Fact]
+    public async Task EpisodeSetAsideForAFailedDownload_KeepsItsDailyRetry_WhileTheRestWaitsToAir()
+    {
+        UseConfig(new PluginConfiguration());
+        var releases = ReleasesReturning(_ => [Candidate("x")]);
+        var e8 = Episode(8, RequestStatus.RequiresAttention, DateTime.UtcNow.AddDays(-2));
+        e8.ErrorMessage = "HTTP 404";
+        e8.ParkedAtUtc = DateTimeOffset.UtcNow - TimeSpan.FromHours(1);
+        var e9Airs = DateTime.UtcNow.AddDays(7);
+        var req = Series(e8, Episode(9, airDate: e9Airs));
+        req.NextAttemptUtc = e9Airs + DownloadUnit.ReleaseGrace;
+
+        await Tracker(RepoFor(req), releases: releases).ProcessRequestAsync(req);
+
+        releases.VerifyNoOtherCalls();
+        Assert.Equal(RequestStatus.RequiresAttention, e8.Status);
+    }
+
+    [Fact]
     public async Task SeasonEpisodeWithoutAirDate_NotAiredYet_IsNotSearched()
     {
         UseConfig(new PluginConfiguration());
