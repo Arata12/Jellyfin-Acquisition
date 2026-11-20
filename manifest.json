@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "1.5.10.0",
+        "changelog": "Episodios apartados por no tener releases: si lo único pendiente son episodios que aún no se han emitido, vuelven a buscarse en el momento en lugar de esperar al día siguiente o a la emisión del siguiente episodio. Arregla las solicitudes que se quedaron con un episodio apartado en versiones anteriores.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/Arata12/Jellyfin-Acquisition/releases/download/v1.5.10.0/Jellyfind_1.5.10.0.zip",
+        "checksum": "ca07e5da9184e8e9fd136f8791e08eb7",
+        "timestamp": "2026-11-20T20:07:01.0000000Z"
+      },
+      {
         "version": "1.5.9.0",
         "changelog": "Episodios recién emitidos: un episodio ya emitido sin releases ya no se aparta por los episodios posteriores sin fecha de emisión en Sonarr; antes de apartarlo se releen las fechas en Sonarr.\nEpisodios apartados: el reintento automático cada 24 horas se hace en ese momento, sin esperar a que se emita el siguiente episodio.\nSelección manual: mientras el siguiente episodio espera su emisión, «Ver releases» busca el episodio apartado y deja elegir sus releases (antes salían como «Es otro episodio»).",
         "targetAbi": "12.2.0.0",
