@@ -108,6 +108,18 @@ public class AcquisitionRequest
     }
 
     /// <summary>
+    /// The download a manual release list is for: the active one, or, while it waits for its air date, the first one
+    /// set aside, so an aired episode without releases can still be searched and chosen by hand.
+    /// </summary>
+    public DownloadUnit? GetSelectionUnit()
+    {
+        var active = GetActiveUnit();
+        var waitingToAir = active is { Status: RequestStatus.Pending or RequestStatus.Searching, SelectedRelease: null } &&
+                           active.SearchableFromUtc > DateTime.UtcNow;
+        return waitingToAir ? Units.FirstOrDefault(u => u.Status == RequestStatus.RequiresAttention) ?? active : active;
+    }
+
+    /// <summary>
     /// Maximum number of history entries kept per request; older entries are discarded to bound the store size.
     /// </summary>
     public const int MaxHistoryEntries = 200;

@@ -627,7 +627,7 @@ public class AcquisitionController : ControllerBase
             return Forbid();
         }
 
-        var activeUnit = request.GetActiveUnit();
+        var activeUnit = request.GetSelectionUnit();
         var expectedUnitId = activeUnit?.Id;
         var hasFreshList = request.AvailableReleasesUnitId == expectedUnitId &&
                            request.AvailableReleasesUpdatedAt.HasValue &&
@@ -657,7 +657,7 @@ public class AcquisitionController : ControllerBase
             var fresh = await _requestRepo.GetByIdAsync(id, ct).ConfigureAwait(false);
             if (fresh != null && fresh.Status is RequestStatus.Searching or RequestStatus.Pending or RequestStatus.RequiresAttention)
             {
-                var freshActiveUnit = fresh.GetActiveUnit();
+                var freshActiveUnit = fresh.GetSelectionUnit();
                 if (freshActiveUnit?.Id == expectedUnitId)
                 {
                     fresh.AvailableReleases = releases;
@@ -718,7 +718,7 @@ public class AcquisitionController : ControllerBase
                 });
             }
 
-            var activeUnit = request.GetActiveUnit();
+            var activeUnit = request.GetSelectionUnit();
             if (activeUnit != null && request.AvailableReleasesUnitId != activeUnit.Id)
             {
                 return Conflict(new ErrorResponseDto { Message = "La lista de releases es de una descarga anterior. Vuelve a abrir la lista para actualizarla." });

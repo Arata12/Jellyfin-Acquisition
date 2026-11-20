@@ -819,13 +819,40 @@ public class SeriesProgressTests
         Assert.True(dto.Progress.Following);
     }
 
-    private static AcquisitionController Controller(Mock<IRequestRepository> repo, Guid userId)
+    [Fact]
+    public async Task ManualSearch_WhileTheNextEpisodeWaitsToAir_IsForTheEpisodeSetAside()
+    {
+        // The list was always for the active download, the next episode still to air, so the one set aside could not be chosen
+        UseConfig(new PluginConfiguration { AllowAllUsers = true });
+        var userId = Guid.NewGuid();
+        var e8 = Episode(8, RequestStatus.RequiresAttention, DateTime.UtcNow.AddDays(-2));
+        e8.ErrorMessage = "No se encontraron releases válidas";
+        var req = Series(Episode(7, RequestStatus.Available), e8, Episode(9, airDate: DateTime.UtcNow.AddDays(7)));
+        req.UserId = userId;
+        var releases = new Mock<IReleaseService>();
+        releases.Setup(r => r.SearchAndEvaluateReleasesForUnitAsync(It.IsAny<AcquisitionRequest>(), e8, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Candidate("Frieren - 08")]);
+        var controller = Controller(RepoFor(req), userId, releases.Object);
+
+        var list = await controller.GetReleases(req.Id, refresh: true, CancellationToken.None);
+        Assert.Equal("Frieren - 08", Assert.Single(Assert.IsType<List<ReleaseCandidateDto>>(Assert.IsType<OkObjectResult>(list.Result).Value)).Title);
+        Assert.Equal("u8", req.AvailableReleasesUnitId);
+
+        var result = await controller.SelectRelease(req.Id, new SelectReleaseDto { ReleaseId = "Frieren - 08" }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(RequestStatus.Pending, e8.Status);
+        Assert.Equal("Frieren - 08", e8.SelectedRelease!.Title);
+        Assert.Equal("u8", req.GetActiveUnit()!.Id);
+    }
+
+    private static AcquisitionController Controller(Mock<IRequestRepository> repo, Guid userId, IReleaseService? releases = null)
     {
         var users = new Mock<IUserManager>();
         users.Setup(u => u.GetUserById(userId)).Returns(new Jellyfin.Database.Implementations.Entities.User("user", "user", "user"));
         var tracker = new Mock<ITrackerService>();
         tracker.Setup(t => t.AcquireLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(Mock.Of<IDisposable>());
-        return new AcquisitionController(Mock.Of<ICatalogService>(), repo.Object, tracker.Object, Mock.Of<IReleaseService>(), Mock.Of<ISonarrClient>(),
+        return new AcquisitionController(Mock.Of<ICatalogService>(), repo.Object, tracker.Object, releases ?? Mock.Of<IReleaseService>(), Mock.Of<ISonarrClient>(),
             users.Object, Mock.Of<ILogger<AcquisitionController>>())
         {
             ControllerContext = new ControllerContext
