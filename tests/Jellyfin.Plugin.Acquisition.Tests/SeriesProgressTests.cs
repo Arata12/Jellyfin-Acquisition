@@ -266,6 +266,52 @@ public class SeriesProgressTests
     }
 
     [Fact]
+    public async Task AiredEpisodeWithoutReleases_IsNotSetAside_ForLaterEpisodesWithoutAirDate()
+    {
+        // Later episodes of the season without a date in Sonarr counted as searchable and the aired one was set aside
+        UseConfig(new PluginConfiguration());
+        var releases = ReleasesReturning(_ => []);
+        var e8 = Episode(8, airDate: DateTime.UtcNow.AddDays(-1));
+        e8.SearchAttempts = 5;
+        var e9Airs = DateTime.UtcNow.AddDays(7);
+        var req = Series(e8, Episode(9, airDate: e9Airs), Episode(10), Episode(11));
+        req.Scope = new RequestScope { SeasonNumbers = [1] };
+        var sonarr = new Mock<ISonarrClient>();
+        sonarr.Setup(s => s.GetEpisodesAsync(1, It.IsAny<CancellationToken>())).ReturnsAsync(
+        [
+            new SonarrEpisode { Id = 8, SeasonNumber = 1, EpisodeNumber = 8, AirDateUtc = DateTime.UtcNow.AddDays(-1) },
+            new SonarrEpisode { Id = 9, SeasonNumber = 1, EpisodeNumber = 9, AirDateUtc = e9Airs },
+            new SonarrEpisode { Id = 10, SeasonNumber = 1, EpisodeNumber = 10 },
+            new SonarrEpisode { Id = 11, SeasonNumber = 1, EpisodeNumber = 11 }
+        ]);
+
+        await Tracker(RepoFor(req), sonarr: sonarr, releases: releases).ProcessRequestAsync(req);
+
+        Assert.Equal(RequestStatus.Pending, e8.Status);
+        Assert.Equal("u8", req.GetActiveUnit()!.Id);
+        Assert.Contains("No se encontraron releases válidas para S01E08. Se seguirá buscando", req.History.Last().Message);
+    }
+
+    [Fact]
+    public async Task ParkedEpisodeRequeuedAfter24Hours_IsSearched_WhileTheNextWaitsToAir()
+    {
+        // The wait for the next episode's air date held back the daily retry of the one set aside
+        UseConfig(new PluginConfiguration());
+        var releases = ReleasesReturning(_ => []);
+        var e8 = Episode(8, RequestStatus.RequiresAttention, DateTime.UtcNow.AddDays(-2));
+        e8.ParkedAtUtc = DateTimeOffset.UtcNow - TimeSpan.FromHours(25);
+        var e9Airs = DateTime.UtcNow.AddDays(7);
+        var req = Series(e8, Episode(9, airDate: e9Airs));
+        req.NextAttemptUtc = e9Airs + DownloadUnit.ReleaseGrace;
+
+        await Tracker(RepoFor(req), releases: releases).ProcessRequestAsync(req);
+
+        releases.Verify(r => r.SearchAndEvaluateReleasesForUnitAsync(It.IsAny<AcquisitionRequest>(), e8, It.IsAny<CancellationToken>()), Times.Once());
+        Assert.Equal(RequestStatus.Pending, e8.Status);
+        Assert.Contains("No se encontraron releases válidas para S01E08", req.History.Last().Message);
+    }
+
+    [Fact]
     public async Task SeasonEpisodeWithoutAirDate_NotAiredYet_IsNotSearched()
     {
         UseConfig(new PluginConfiguration());

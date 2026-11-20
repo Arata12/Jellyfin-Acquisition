@@ -656,7 +656,7 @@ public class TrackerService : ITrackerService
 
                 // Set the episode aside after a few empty searches when others are waiting; the last one keeps retrying
                 activeUnit.SearchAttempts++;
-                if (activeUnit.SearchAttempts >= MaxEmptySearches && HasOtherPendingUnit(request, activeUnit))
+                if (activeUnit.SearchAttempts >= MaxEmptySearches && await HasOtherSearchableUnitAsync(request, activeUnit, ct).ConfigureAwait(false))
                 {
                     await ParkUnitAsync(
                         request,
@@ -1240,9 +1240,31 @@ public class TrackerService : ITrackerService
     /// <summary>
     /// Another download can be searched right now: episodes still waiting to air do not count, so an aired episode
     /// without releases yet keeps being searched instead of being set aside for one that cannot be searched.
+    /// Episodes of a requested season without an air date count only once Sonarr shows them aired, the same rule the
+    /// search applies; air dates are read again first, since the stored ones may be stale.
     /// </summary>
-    private static bool HasOtherPendingUnit(AcquisitionRequest request, DownloadUnit unit) =>
-        request.Units.Any(u => !ReferenceEquals(u, unit) && u.Status == RequestStatus.Pending && u.SearchableFromUtc <= DateTime.UtcNow);
+    private async Task<bool> HasOtherSearchableUnitAsync(AcquisitionRequest request, DownloadUnit unit, CancellationToken ct)
+    {
+        bool IsCandidate(DownloadUnit u) => !ReferenceEquals(u, unit) && u.Status == RequestStatus.Pending && u.SearchableFromUtc <= DateTime.UtcNow;
+        bool NeedsSonarr(DownloadUnit u) => !u.AirDateUtc.HasValue && !u.IsFullSeasonPack && IsFromSeasonSelection(request, u);
+
+        if (!request.Units.Any(IsCandidate)) return false;
+        if (request.Kind != MediaKind.Series || !request.ArrId.HasValue) return true;
+
+        // Without Sonarr's data the search does not wait for undated episodes either, so they count
+        var episodes = await _sonarrClient.GetEpisodesAsync(request.ArrId.Value, ct).ConfigureAwait(false);
+        if (episodes is not { Count: > 0 }) return true;
+
+        RefreshUnitAirDates(request, episodes);
+        var cutoff = DateTime.UtcNow - DownloadUnit.ReleaseGrace;
+        return request.Units.Where(IsCandidate).Any(u =>
+        {
+            if (!NeedsSonarr(u)) return true;
+            var episode = episodes.FirstOrDefault(e => u.EpisodeIds.Contains(e.Id))
+                ?? episodes.FirstOrDefault(e => e.SeasonNumber == u.SeasonNumber && u.EpisodeNumbers.Contains(e.EpisodeNumber));
+            return episode == null || HasAired(episode, episodes, cutoff);
+        });
+    }
 
     /// <summary>
     /// The unit has not been searched successfully yet: pending, or marked as the next one to search after the previous
@@ -2320,6 +2342,8 @@ public class TrackerService : ITrackerService
 
         if (requeued.Count > 0)
         {
+            // Searched on this pass: the wait for a later episode's air date must not hold back one that has aired
+            request.NextAttemptUtc = null;
             request.AddHistory(request.Status, $"Se vuelve a intentar automáticamente: {string.Join(", ", requeued.Select(u => u.Describe(request.Kind)))}.");
         }
 
